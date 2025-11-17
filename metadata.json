@@ -1,0 +1,5 @@
+{
+  "name": "Auditor Fiscal AI",
+  "description": "An AI-powered application to audit Brazilian fiscal documents (NFe, NFSe, CTe). It validates taxes, identifies inconsistencies, and provides actionable insights using Gemini. Includes an AI chatbot for tax-related questions.",
+  "requestFramePermissions": []
+}

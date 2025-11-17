@@ -17,6 +17,21 @@ const validateXML = async (file: File): Promise<ValidationResult> => {
 
     // Use getElementsByTagName for namespace-agnostic checks. This is more robust.
 
+    // CTe validation - Check for CTe first, as it can contain NFe info inside it.
+    const infCteNodes = doc.getElementsByTagName('infCte');
+    if (infCteNodes.length > 0) {
+        const infCteNode = infCteNodes[0];
+        const hasVersion = infCteNode.getAttribute('versao');
+        const hasIde = infCteNode.getElementsByTagName('ide').length > 0;
+        const emitTags = infCteNode.getElementsByTagName('emit');
+        const hasEmitCnpj = emitTags.length > 0 && emitTags[0].getElementsByTagName('CNPJ').length > 0;
+        const hasVPrest = infCteNode.getElementsByTagName('vPrest').length > 0;
+        if (hasVersion && hasIde && hasEmitCnpj && hasVPrest) {
+            return { isValid: true };
+        }
+        return { isValid: false, error: 'O arquivo de CTe parece inválido ou incompleto. Faltam atributos essenciais (como a versão) ou tags como <ide>, <emit><CNPJ> ou <vPrest>.' };
+    }
+
     // NFe validation
     const infNFeNodes = doc.getElementsByTagName('infNFe');
     if (infNFeNodes.length > 0) {
@@ -67,21 +82,6 @@ const validateXML = async (file: File): Promise<ValidationResult> => {
         }
         
         return { isValid: true };
-    }
-
-    // CTe validation
-    const infCteNodes = doc.getElementsByTagName('infCte');
-    if (infCteNodes.length > 0) {
-        const infCteNode = infCteNodes[0];
-        const hasVersion = infCteNode.getAttribute('versao');
-        const hasIde = infCteNode.getElementsByTagName('ide').length > 0;
-        const emitTags = infCteNode.getElementsByTagName('emit');
-        const hasEmitCnpj = emitTags.length > 0 && emitTags[0].getElementsByTagName('CNPJ').length > 0;
-        const hasVPrest = infCteNode.getElementsByTagName('vPrest').length > 0;
-        if (hasVersion && hasIde && hasEmitCnpj && hasVPrest) {
-            return { isValid: true };
-        }
-        return { isValid: false, error: 'O arquivo de CTe parece inválido ou incompleto. Faltam atributos essenciais (como a versão) ou tags como <ide>, <emit><CNPJ> ou <vPrest>.' };
     }
     
     // NFSe validation (common ABRASF pattern)

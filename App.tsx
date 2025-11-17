@@ -3,6 +3,7 @@ import { Header } from './components/Header';
 import { FileUpload } from './components/FileUpload';
 import { AuditResults } from './components/AuditResults';
 import { Chatbot } from './components/Chatbot';
+import { Footer } from './components/Footer';
 import { analyzeDocument } from './services/geminiService';
 import { validateFile } from './services/fileValidator';
 import type { AuditResult } from './types';
@@ -110,9 +111,9 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-200">
+    <div className="min-h-screen bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-200 flex flex-col">
       <Header />
-      <main className="container mx-auto p-4 md:p-8">
+      <main className="container mx-auto p-4 md:p-8 flex-grow">
         <div className="max-w-4xl mx-auto">
           <div className="text-center mb-8">
             <h1 className="text-3xl md:text-4xl font-bold text-indigo-600 dark:text-indigo-400">Auditor Fiscal AI</h1>
@@ -149,6 +150,7 @@ const App: React.FC = () => {
         </div>
       </main>
       <Chatbot auditResult={auditResult} />
+      <Footer />
     </div>
   );
 };

@@ -71,14 +71,14 @@ export async function analyzeDocument(fileContent: string, fileName: string, com
   const model = "gemini-2.5-flash";
 
   const prompt = `
-    Você é um auditor fiscal especialista no sistema tributário brasileiro. Analise o seguinte documento fiscal brasileiro (NFe, NFSe ou CTe) e identifique todas as inconsistências, erros de cálculo, e retenções obrigatórias ausentes.
+    Você é um auditor fiscal especialista no sistema tributário brasileiro. Analise o seguinte conteúdo de um documento fiscal brasileiro (que pode ser o conteúdo de um arquivo XML ou o texto extraído de um arquivo PDF) e identifique todas as inconsistências, erros de cálculo, e retenções obrigatórias ausentes.
 
     Contexto:
     - Nome do arquivo: "${fileName}"
-    - Nome da empresa emissora (extraído previamente): "${companyName || 'Não extraído'}"
-    - Data de emissão (extraída previamente): "${documentDate || 'Não extraída'}"
-    - CNPJ do tomador/destinatário (extraído previamente): "${takerCnpj || 'Não extraído'}"
-    - Nome do tomador/destinatário (extraído previamente): "${takerName || 'Não extraído'}"
+    - Nome da empresa emissora (extraído previamente, se XML): "${companyName || 'Não extraído'}"
+    - Data de emissão (extraída previamente, se XML): "${documentDate || 'Não extraída'}"
+    - CNPJ do tomador/destinatário (extraído previamente, se XML): "${takerCnpj || 'Não extraído'}"
+    - Nome do tomador/destinatário (extraído previamente, se XML): "${takerName || 'Não extraído'}"
 
     Conteúdo do documento:
     \`\`\`
@@ -86,17 +86,18 @@ export async function analyzeDocument(fileContent: string, fileName: string, com
     \`\`\`
 
     Siga estas regras estritamente:
-    1.  Extraia e retorne o nome da empresa emissora (emitente ou prestador) no campo 'companyName'. Se não encontrar, retorne uma string vazia.
-    2.  Extraia e retorne a data de emissão do documento no campo 'documentDate'. Se não encontrar, retorne uma string vazia.
-    3.  Extraia e retorne o CNPJ do tomador ou destinatário no campo 'takerCnpj'. Se não houver um (ex: nota para consumidor final sem CNPJ) ou não encontrar, retorne uma string vazia.
-    4.  Extraia e retorne o Nome do tomador ou destinatário no campo 'takerName'. Se não houver um ou não encontrar, retorne uma string vazia.
-    5.  Verifique a validade de campos chave como CNPJ, Chave de Acesso, NCM, CFOP.
-    6.  Valide todos os cálculos de impostos (ICMS, IPI, PIS, COFINS, ISS).
-    7.  Lembre-se da regra crítica do STF: O ICMS deve ser EXCLUÍDO da base de cálculo do PIS/COFINS. Verifique isso com atenção máxima.
-    8.  Identifique a necessidade de retenções na fonte (IRRF, PIS/COFINS/CSLL, INSS) com base no serviço prestado e no regime tributário do prestador e tomador.
-    9.  Atribua um 'riskScore' de 0 a 100 e um 'riskLevel'.
-    10. Forneça uma lista detalhada de anomalias e recomendações práticas.
-    11. Responda sempre em português brasileiro.
+    1.  Se o conteúdo for texto extraído de um PDF, ele pode não estar perfeitamente estruturado. Faça o seu melhor para interpretar os dados, mesmo que espaçamentos e quebras de linha estejam irregulares.
+    2.  Extraia e retorne o nome da empresa emissora (emitente ou prestador) no campo 'companyName'. Se não encontrar, retorne uma string vazia.
+    3.  Extraia e retorne a data de emissão do documento no campo 'documentDate'. Se não encontrar, retorne uma string vazia.
+    4.  Extraia e retorne o CNPJ do tomador ou destinatário no campo 'takerCnpj'. Se não houver um (ex: nota para consumidor final sem CNPJ) ou não encontrar, retorne uma string vazia.
+    5.  Extraia e retorne o Nome do tomador ou destinatário no campo 'takerName'. Se não houver um ou não encontrar, retorne uma string vazia.
+    6.  Verifique a validade de campos chave como CNPJ, Chave de Acesso, NCM, CFOP.
+    7.  Valide todos os cálculos de impostos (ICMS, IPI, PIS, COFINS, ISS).
+    8.  Lembre-se da regra crítica do STF: O ICMS deve ser EXCLUÍDO da base de cálculo do PIS/COFINS. Verifique isso com atenção máxima.
+    9.  Identifique a necessidade de retenções na fonte (IRRF, PIS/COFINS/CSLL, INSS) com base no serviço prestado e no regime tributário do prestador e tomador.
+    10. Atribua um 'riskScore' de 0 a 100 e um 'riskLevel'.
+    11. Forneça uma lista detalhada de anomalias e recomendações práticas.
+    12. Responda sempre em português brasileiro.
 
     Retorne sua análise estritamente no formato JSON especificado.
   `;

@@ -9,6 +9,8 @@ import { validateFile } from './services/fileValidator';
 import type { AuditResult } from './types';
 import { SparkleIcon } from './components/icons/SparkleIcon';
 
+declare const pdfjsLib: any;
+
 const App: React.FC = () => {
   const [auditResult, setAuditResult] = useState<AuditResult | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -30,9 +32,31 @@ const App: React.FC = () => {
     }
 
     try {
-      const fileContent = await file.text();
+      let fileContent = '';
+      const fileType = file.type;
+      const fileNameLower = file.name.toLowerCase();
+
+      if (fileType.includes('pdf') || fileNameLower.endsWith('.pdf')) {
+          pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs`;
+          
+          const arrayBuffer = await file.arrayBuffer();
+          const loadingTask = pdfjsLib.getDocument(arrayBuffer);
+          const pdf = await loadingTask.promise;
+          
+          let fullText = '';
+          for (let i = 1; i <= pdf.numPages; i++) {
+              const page = await pdf.getPage(i);
+              const textContent = await page.getTextContent();
+              const pageText = textContent.items.map((item: { str: string }) => item.str).join(' ');
+              fullText += pageText + '\n\n';
+          }
+          fileContent = fullText;
+      } else {
+          fileContent = await file.text();
+      }
+
       if (!fileContent) {
-        throw new Error("File is empty or could not be read.");
+        throw new Error("O arquivo está vazio ou o conteúdo não pôde ser extraído.");
       }
       
       let companyName: string | null = null;

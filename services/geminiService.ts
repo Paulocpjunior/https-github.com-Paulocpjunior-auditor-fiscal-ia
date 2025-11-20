@@ -1,5 +1,7 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import type { AuditResult, ChatMessage, GroundingSource } from '../types';
+import type { CompanyData } from './cnpjService';
 
 if (!process.env.API_KEY) {
   throw new Error("API_KEY environment variable not set");
@@ -67,18 +69,37 @@ const auditResponseSchema = {
 };
 
 
-export async function analyzeDocument(fileContent: string, fileName: string, companyName?: string | null, documentDate?: string | null, takerCnpj?: string | null, takerName?: string | null): Promise<AuditResult> {
+export async function analyzeDocument(
+    fileContent: string, 
+    fileName: string, 
+    companyName?: string | null, 
+    documentDate?: string | null, 
+    takerCnpj?: string | null, 
+    takerName?: string | null,
+    officialEmitterData?: CompanyData | null,
+    officialTakerData?: CompanyData | null
+): Promise<AuditResult> {
   const model = "gemini-2.5-flash";
+
+  // Format official data for the prompt if available
+  const officialEmitterStr = officialEmitterData 
+    ? `\n    - DADOS OFICIAIS DO EMISSOR (Receita Federal/API): Razão Social: "${officialEmitterData.razao_social}", Situação: "${officialEmitterData.situacao_cadastral}", CNAE: "${officialEmitterData.cnae_fiscal_descricao}", UF: "${officialEmitterData.uf}".`
+    : '';
+
+  const officialTakerStr = officialTakerData
+    ? `\n    - DADOS OFICIAIS DO TOMADOR (Receita Federal/API): Razão Social: "${officialTakerData.razao_social}", Situação: "${officialTakerData.situacao_cadastral}".`
+    : '';
 
   const prompt = `
     Você é um auditor fiscal especialista no sistema tributário brasileiro. Analise o seguinte conteúdo de um documento fiscal brasileiro (que pode ser o conteúdo de um arquivo XML ou o texto extraído de um arquivo PDF) e identifique todas as inconsistências, erros de cálculo, e retenções obrigatórias ausentes.
 
-    Contexto:
+    Contexto do Documento (Extraído):
     - Nome do arquivo: "${fileName}"
-    - Nome da empresa emissora (extraído previamente, se XML): "${companyName || 'Não extraído'}"
-    - Data de emissão (extraída previamente, se XML): "${documentDate || 'Não extraída'}"
-    - CNPJ do tomador/destinatário (extraído previamente, se XML): "${takerCnpj || 'Não extraído'}"
-    - Nome do tomador/destinatário (extraído previamente, se XML): "${takerName || 'Não extraído'}"
+    - Nome da empresa emissora: "${companyName || 'Não extraído'}"
+    - Data de emissão: "${documentDate || 'Não extraída'}"
+    - CNPJ do tomador/destinatário: "${takerCnpj || 'Não extraído'}"
+    - Nome do tomador/destinatário: "${takerName || 'Não extraído'}"
+    ${officialEmitterStr}${officialTakerStr}
 
     Conteúdo do documento:
     \`\`\`
@@ -86,20 +107,18 @@ export async function analyzeDocument(fileContent: string, fileName: string, com
     \`\`\`
 
     Siga estas regras estritamente:
-    1.  Se o conteúdo for texto extraído de um PDF, ele pode não estar perfeitamente estruturado. Faça o seu melhor para interpretar os dados, mesmo que espaçamentos e quebras de linha estejam irregulares.
-    2.  Extraia e retorne o nome da empresa emissora (emitente ou prestador) no campo 'companyName'. Se não encontrar, retorne uma string vazia.
-    3.  Extraia e retorne a data de emissão do documento no campo 'documentDate'. Se não encontrar, retorne uma string vazia.
-    4.  Extraia e retorne o CNPJ do tomador ou destinatário no campo 'takerCnpj'. Se não houver um (ex: nota para consumidor final sem CNPJ) ou não encontrar, retorne uma string vazia.
-    5.  Extraia e retorne o Nome do tomador ou destinatário no campo 'takerName'. Se não houver um ou não encontrar, retorne uma string vazia.
-    6.  Verifique a validade de campos chave como CNPJ, Chave de Acesso, NCM, CFOP.
-    7.  Valide todos os cálculos de impostos (ICMS, IPI, PIS, COFINS, ISS).
-    8.  Lembre-se da regra crítica do STF: O ICMS deve ser EXCLUÍDO da base de cálculo do PIS/COFINS. Verifique isso com atenção máxima.
-    9.  Identifique a necessidade de retenções na fonte (IRRF, PIS/COFINS/CSLL, INSS) com base no serviço prestado e no regime tributário do prestador e tomador.
-    10. Atribua um 'riskScore' de 0 a 100 e um 'riskLevel'.
-    11. Forneça uma lista detalhada de anomalias e recomendações práticas.
-    12. Responda sempre em português brasileiro.
-
-    Retorne sua análise estritamente no formato JSON especificado.
+    1.  Se o conteúdo for texto extraído de um PDF, interprete os dados da melhor forma possível.
+    2.  Extraia e retorne os metadados (companyName, documentDate, takerCnpj, takerName) baseados no conteúdo do arquivo.
+    3.  **CRÍTICO: Validação Cadastral**: Se foram fornecidos "DADOS OFICIAIS" acima, compare-os com os dados dentro do documento XML/PDF. 
+        - Se a Razão Social do documento for muito diferente da oficial, gere um alerta (Warning).
+        - Se a Situação Cadastral oficial não for "ATIVA", gere um erro (Error) grave.
+        - Se a atividade (CNAE) oficial não for compatível com os itens/serviços da nota, gere um alerta.
+    4.  Verifique a validade de campos chave como CNPJ, Chave de Acesso, NCM, CFOP.
+    5.  Valide todos os cálculos de impostos (ICMS, IPI, PIS, COFINS, ISS).
+    6.  Lembre-se da regra crítica do STF: O ICMS deve ser EXCLUÍDO da base de cálculo do PIS/COFINS.
+    7.  Identifique retenções na fonte necessárias (IRRF, CSLL, INSS).
+    8.  Atribua um 'riskScore' (0-100) e 'riskLevel'.
+    9.  Responda estritamente no formato JSON especificado, em português brasileiro.
   `;
 
   try {

@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback } from 'react';
 import { Header } from './components/Header';
 import { FileUpload } from './components/FileUpload';
@@ -6,6 +7,7 @@ import { Chatbot } from './components/Chatbot';
 import { Footer } from './components/Footer';
 import { analyzeDocument } from './services/geminiService';
 import { validateFile } from './services/fileValidator';
+import { fetchCompanyData, type CompanyData } from './services/cnpjService';
 import type { AuditResult } from './types';
 import { SparkleIcon } from './components/icons/SparkleIcon';
 
@@ -60,6 +62,7 @@ const App: React.FC = () => {
       }
       
       let companyName: string | null = null;
+      let emitterCnpj: string | null = null;
       let documentDate: string | null = null;
       let takerCnpj: string | null = null;
       let takerName: string | null = null;
@@ -92,6 +95,7 @@ const App: React.FC = () => {
             const infNFe = findChild(nfeBase, 'infNFe');
 
             companyName = getTextContent(infNFe, ['emit', 'xNome']);
+            emitterCnpj = getTextContent(infNFe, ['emit', 'CNPJ']);
             documentDate = getTextContent(infNFe, ['ide', 'dhEmi']);
             takerCnpj = getTextContent(infNFe, ['dest', 'CNPJ']);
             takerName = getTextContent(infNFe, ['dest', 'xNome']);
@@ -101,6 +105,7 @@ const App: React.FC = () => {
             const infCte = findChild(cteBase, 'infCte');
 
             companyName = getTextContent(infCte, ['emit', 'xNome']);
+            emitterCnpj = getTextContent(infCte, ['emit', 'CNPJ']);
             documentDate = getTextContent(infCte, ['ide', 'dhEmi']);
             takerCnpj = getTextContent(infCte, ['dest', 'CNPJ']);
             takerName = getTextContent(infCte, ['dest', 'xNome']);
@@ -110,12 +115,34 @@ const App: React.FC = () => {
             
             documentDate = getTextContent(infNfse, ['DataEmissao']);
             companyName = getTextContent(infNfse, ['PrestadorServico', 'RazaoSocial']);
+            emitterCnpj = getTextContent(infNfse, ['PrestadorServico', 'IdentificacaoPrestador', 'Cnpj']);
             takerCnpj = getTextContent(infNfse, ['TomadorServico', 'IdentificacaoTomador', 'Cnpj']);
             takerName = getTextContent(infNfse, ['TomadorServico', 'RazaoSocial']);
         }
       }
       
-      const result = await analyzeDocument(fileContent, file.name, companyName, documentDate, takerCnpj, takerName);
+      // Fetch official company data if CNPJs are available
+      let officialEmitterData: CompanyData | null = null;
+      let officialTakerData: CompanyData | null = null;
+
+      if (emitterCnpj) {
+        officialEmitterData = await fetchCompanyData(emitterCnpj);
+      }
+      if (takerCnpj) {
+        officialTakerData = await fetchCompanyData(takerCnpj);
+      }
+
+      const result = await analyzeDocument(
+          fileContent, 
+          file.name, 
+          companyName, 
+          documentDate, 
+          takerCnpj, 
+          takerName,
+          officialEmitterData,
+          officialTakerData
+      );
+      
       setAuditResult(result);
 
     } catch (err) {
@@ -156,7 +183,7 @@ const App: React.FC = () => {
               <SparkleIcon className="w-12 h-12 text-indigo-500 animate-pulse" />
               <p className="mt-4 text-lg font-semibold text-slate-700 dark:text-slate-300">Analisando documento...</p>
               <p className="text-slate-500 dark:text-slate-400">{currentFile?.name}</p>
-              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400 animate-pulse">Isso pode levar alguns instantes.</p>
+              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400 animate-pulse">Isso pode levar alguns instantes. Estamos consultando bases oficiais.</p>
             </div>
           )}
 

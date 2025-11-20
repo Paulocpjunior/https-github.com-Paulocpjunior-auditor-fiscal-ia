@@ -49,20 +49,25 @@ const validateXML = async (file: File): Promise<ValidationResult> => {
         // Product validation loop
         const productNodes = infNFeNode.getElementsByTagName('prod');
         for (const prod of Array.from(productNodes)) {
+            // Get item number for better context in errors
+            // prod is child of det
+            const detNode = prod.parentElement;
+            const nItem = detNode?.getAttribute('nItem') || '?';
+
             // NCM validation
             const ncmNode = prod.getElementsByTagName('NCM');
             if (ncmNode.length === 0 || !ncmNode[0].textContent || !/^\d{8}$/.test(ncmNode[0].textContent.trim())) {
-                return { isValid: false, error: 'O arquivo de NFe contém produtos com NCM inválido ou ausente. O NCM deve ser um código numérico de 8 dígitos.' };
+                return { isValid: false, error: `Item ${nItem}: O arquivo de NFe contém produtos com NCM inválido ou ausente. O NCM deve ser um código numérico de 8 dígitos.` };
             }
 
             // vProd validation
             const vProdNode = prod.getElementsByTagName('vProd');
             if (vProdNode.length === 0 || !vProdNode[0].textContent) {
-                return { isValid: false, error: 'O arquivo de NFe contém produtos sem o valor total (vProd).' };
+                return { isValid: false, error: `Item ${nItem}: O arquivo de NFe contém produtos sem o valor total (vProd).` };
             }
             const vProd = parseFloat(vProdNode[0].textContent);
             if (isNaN(vProd) || vProd <= 0) {
-                return { isValid: false, error: 'O arquivo de NFe contém produtos com valor total (vProd) inválido. O valor deve ser um número positivo.' };
+                return { isValid: false, error: `Item ${nItem}: O arquivo de NFe contém produtos com valor total (vProd) inválido. O valor deve ser um número positivo.` };
             }
 
             // vProd consistency check with qCom * vUnCom
@@ -73,9 +78,13 @@ const validateXML = async (file: File): Promise<ValidationResult> => {
                 const vUnCom = parseFloat(vUnComNode[0].textContent);
                 if (!isNaN(qCom) && !isNaN(vUnCom)) {
                     const calculatedTotal = qCom * vUnCom;
-                    // Use a small tolerance for floating point comparison
+                    // Use a small tolerance for floating point comparison (0.01 for currency)
+                    // We verify if the XML total matches Quantity * Unit Price
                     if (Math.abs(calculatedTotal - vProd) > 0.01) {
-                        return { isValid: false, error: `Inconsistência de cálculo encontrada: O valor total do produto (vProd=${vProd.toFixed(2)}) não corresponde à quantidade (${qCom}) x valor unitário (${vUnCom.toFixed(2)}) = ${calculatedTotal.toFixed(2)}.` };
+                        return { 
+                            isValid: false, 
+                            error: `Inconsistência de cálculo no Item ${nItem}: O valor total do produto (vProd=${vProd.toFixed(2)}) diverge do cálculo Quantidade (${qCom}) x Valor Unitário (${vUnCom.toFixed(4)}) = ${calculatedTotal.toFixed(2)}. Diferença: ${Math.abs(calculatedTotal - vProd).toFixed(4)}.` 
+                        };
                     }
                 }
             }

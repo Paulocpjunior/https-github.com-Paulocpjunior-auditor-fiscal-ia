@@ -49,7 +49,29 @@ const App: React.FC = () => {
           for (let i = 1; i <= pdf.numPages; i++) {
               const page = await pdf.getPage(i);
               const textContent = await page.getTextContent();
-              const pageText = textContent.items.map((item: { str: string }) => item.str).join(' ');
+              
+              let lastY = -1;
+              let pageText = '';
+              
+              // Sort items by Y descending (top to bottom), then X ascending (left to right)
+              // This ensures reading order is respected before checking line breaks
+              const items = textContent.items.map((item: any) => ({
+                  str: item.str,
+                  y: item.transform ? item.transform[5] : 0,
+                  x: item.transform ? item.transform[4] : 0,
+                  hasEOL: item.hasEOL
+              }));
+
+              for (const item of items) {
+                  if (lastY !== -1 && Math.abs(item.y - lastY) > 8) { // Threshold for new line detection
+                      pageText += '\n';
+                  } else if (lastY !== -1 && item.str.trim().length > 0) {
+                      // Add space if it's on the same line and not empty
+                      pageText += ' '; 
+                  }
+                  pageText += item.str;
+                  lastY = item.y;
+              }
               fullText += pageText + '\n\n';
           }
           fileContent = fullText;
@@ -79,6 +101,7 @@ const App: React.FC = () => {
         };
         
         // Helper to get text content from a path of local names
+        // Uses findChild to be namespace safe
         const getTextContent = (baseElement: Element | undefined | null, path: string[]): string | null => {
             let current = baseElement;
             for (const tagName of path) {
@@ -86,6 +109,14 @@ const App: React.FC = () => {
                 if (!current) return null;
             }
             return current?.textContent ?? null;
+        };
+
+        const getFirstContent = (baseElement: Element | undefined | null, paths: string[][]): string | null => {
+            for (const path of paths) {
+                const result = getTextContent(baseElement, path);
+                if (result) return result;
+            }
+            return null;
         };
         
         const rootTagName = rootElement.localName;
@@ -96,9 +127,13 @@ const App: React.FC = () => {
 
             companyName = getTextContent(infNFe, ['emit', 'xNome']);
             emitterCnpj = getTextContent(infNFe, ['emit', 'CNPJ']);
-            documentDate = getTextContent(infNFe, ['ide', 'dhEmi']);
-            takerCnpj = getTextContent(infNFe, ['dest', 'CNPJ']);
+            
+            // Try different paths for date (NFe 3.10 uses dhEmi, 2.0 uses dEmi)
+            documentDate = getFirstContent(infNFe, [['ide', 'dhEmi'], ['ide', 'dEmi']]);
+            
             takerName = getTextContent(infNFe, ['dest', 'xNome']);
+            // Taker might be CNPJ or CPF
+            takerCnpj = getFirstContent(infNFe, [['dest', 'CNPJ'], ['dest', 'CPF']]);
 
         } else if (rootTagName === 'cteProc' || rootTagName === 'CTe') {
             const cteBase = rootTagName === 'cteProc' ? findChild(rootElement, 'CTe') : rootElement;
@@ -107,17 +142,27 @@ const App: React.FC = () => {
             companyName = getTextContent(infCte, ['emit', 'xNome']);
             emitterCnpj = getTextContent(infCte, ['emit', 'CNPJ']);
             documentDate = getTextContent(infCte, ['ide', 'dhEmi']);
-            takerCnpj = getTextContent(infCte, ['dest', 'CNPJ']);
-            takerName = getTextContent(infCte, ['dest', 'xNome']);
             
-        } else if (rootTagName === 'NFSe') { // ABRASF-like pattern
-            const infNfse = findChild(rootElement, 'InfNfse');
+            // CTe taker can be rem, dest, exped, receb, or tomador
+            // usually 'dest' is the recipient, but 'toma' defines the payer
+            takerName = getFirstContent(infCte, [['dest', 'xNome'], ['rem', 'xNome']]);
+            takerCnpj = getFirstContent(infCte, [['dest', 'CNPJ'], ['dest', 'CPF'], ['rem', 'CNPJ'], ['rem', 'CPF']]);
+            
+        } else if (rootTagName === 'NFSe' || rootTagName === 'CompNfse') { 
+            // Handle ABRASF and other NFSe variations
+            // Sometimes CompNfse wraps Nfse
+            const nfseNode = rootTagName === 'CompNfse' ? findChild(rootElement, 'Nfse') : rootElement;
+            const infNfse = findChild(nfseNode, 'InfNfse');
             
             documentDate = getTextContent(infNfse, ['DataEmissao']);
             companyName = getTextContent(infNfse, ['PrestadorServico', 'RazaoSocial']);
             emitterCnpj = getTextContent(infNfse, ['PrestadorServico', 'IdentificacaoPrestador', 'Cnpj']);
-            takerCnpj = getTextContent(infNfse, ['TomadorServico', 'IdentificacaoTomador', 'Cnpj']);
+            
             takerName = getTextContent(infNfse, ['TomadorServico', 'RazaoSocial']);
+            takerCnpj = getFirstContent(infNfse, [
+                ['TomadorServico', 'IdentificacaoTomador', 'Cnpj'],
+                ['TomadorServico', 'IdentificacaoTomador', 'Cpf']
+            ]);
         }
       }
       
@@ -125,11 +170,12 @@ const App: React.FC = () => {
       let officialEmitterData: CompanyData | null = null;
       let officialTakerData: CompanyData | null = null;
 
+      // Clean CNPJ strings before fetching (remove punctuation)
       if (emitterCnpj) {
-        officialEmitterData = await fetchCompanyData(emitterCnpj);
+        officialEmitterData = await fetchCompanyData(emitterCnpj.replace(/\D/g, ''));
       }
-      if (takerCnpj) {
-        officialTakerData = await fetchCompanyData(takerCnpj);
+      if (takerCnpj && takerCnpj.replace(/\D/g, '').length === 14) {
+        officialTakerData = await fetchCompanyData(takerCnpj.replace(/\D/g, ''));
       }
 
       const result = await analyzeDocument(

@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { getChatResponse } from '../services/geminiService';
 import type { ChatMessage, AuditResult } from '../types';
@@ -15,6 +16,24 @@ const suggestions = [
   'Explique a regra do ICMS na base do PIS/COFINS.',
   'O que é CFOP e qual sua importância?',
 ];
+
+// Helper to check NCM structure in user text
+const checkNcmStructure = (text: string): string | null => {
+  // Regex looks for "NCM" followed by optional separators and then digits
+  // Captures cases like "NCM 12345678", "NCM: 1234.56.78"
+  const ncmRegex = /(?:NCM|código)\s*[:#]?\s*(\d{2,}[\.]?\d*)/i;
+  const match = text.match(ncmRegex);
+  
+  if (match) {
+    const rawCode = match[1].replace(/\D/g, ''); // strip dots
+    if (rawCode.length !== 8) {
+      return `\n[NOTA DO SISTEMA: O usuário mencionou o código/NCM '${rawCode}'. Alerte-o de que este código é ESTRUTURALMENTE INVÁLIDO, pois um NCM deve conter exatamente 8 dígitos numéricos.]`;
+    } else {
+      return `\n[NOTA DO SISTEMA: O usuário mencionou o código/NCM '${rawCode}'. A estrutura de 8 dígitos está correta. Prossiga com a análise tributária deste código.]`;
+    }
+  }
+  return null;
+};
 
 export const Chatbot: React.FC<ChatbotProps> = ({ auditResult }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -55,7 +74,14 @@ export const Chatbot: React.FC<ChatbotProps> = ({ auditResult }) => {
     setIsTyping(true);
 
     try {
-      const response = await getChatResponse(messages, messageText, auditResult);
+      // Check for NCM structure validation and append system note if found
+      const ncmValidationNote = checkNcmStructure(messageText);
+      const textToSend = ncmValidationNote ? `${messageText}${ncmValidationNote}` : messageText;
+
+      // We send the 'textToSend' (which may contain the hidden system note) to the API
+      // But the UI still shows the original 'messageText' via the 'setMessages' above.
+      const response = await getChatResponse(messages, textToSend, auditResult);
+      
       const modelMessage: ChatMessage = {
         id: `model-${Date.now()}`,
         role: 'model',

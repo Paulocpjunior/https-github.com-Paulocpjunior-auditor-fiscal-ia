@@ -38,7 +38,7 @@ const auditResponseSchema = {
     },
     summary: {
         type: Type.STRING,
-        description: "A brief one-sentence summary of the audit findings in Portuguese."
+        description: "A detailed short paragraph (3-5 sentences) summarizing the audit findings, highlighting critical issues, tax inconsistencies, and the overall risk assessment in Portuguese."
     },
     anomalies: {
       type: Type.ARRAY,

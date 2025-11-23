@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useCallback } from 'react';
 import type { AuditResult, Anomaly } from '../types';
 import { CheckCircleIcon } from './icons/CheckCircleIcon';
@@ -74,6 +75,7 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
   const [filters, setFilters] = useState<{ type: string; severity: string }>({ type: 'all', severity: 'all' });
   const [showShareModal, setShowShareModal] = useState(false);
   const [copyStatus, setCopyStatus] = useState('Copiar para Área de Transferência');
+  const [anomaliesCopyStatus, setAnomaliesCopyStatus] = useState('Compartilhar Anomalias');
   const [openSection, setOpenSection] = useState<'anomalies' | 'recommendations' | null>(
     result.anomalies.length > 0 ? 'anomalies' : (result.recommendations.length > 0 ? 'recommendations' : null)
   );
@@ -334,6 +336,26 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
     });
   };
 
+  const handleCopyAnomalies = () => {
+    if (filteredAnomalies.length === 0) return;
+
+    let content = `--- ANOMALIAS ENCONTRADAS (${fileName}) ---\n\n`;
+    filteredAnomalies.forEach((anom, idx) => {
+         content += `[#${idx + 1}] ${anom.message}\n`;
+         content += `   Gravidade: ${anom.severity.toUpperCase()} | Tipo: ${anom.type}\n`;
+         if(anom.code) content += `   Código: ${anom.code}\n`;
+         if(anom.field) content += `   Campo: ${anom.field}\n`;
+         if(anom.found) content += `   Valor Encontrado: ${anom.found}\n`;
+         if(anom.expected) content += `   Valor Esperado: ${anom.expected}\n`;
+         content += '\n';
+    });
+
+    navigator.clipboard.writeText(content).then(() => {
+        setAnomaliesCopyStatus('Copiado!');
+        setTimeout(() => setAnomaliesCopyStatus('Compartilhar Anomalias'), 2000);
+    });
+  };
+
   const mailtoHref = `mailto:?subject=${encodeURIComponent(`Resultado da Auditoria: ${fileName}`)}&body=${encodeURIComponent(getShareableText())}`;
 
   const handleFilterChange = (filterType: 'type' | 'severity', value: string) => {
@@ -439,6 +461,19 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
                                 {Object.entries(severityFilters).map(([value, label]) => (
                                     <FilterButton key={value} label={label} value={value} isActive={filters.severity === value} onClick={(v) => handleFilterChange('severity', v)} />
                                 ))}
+                            </div>
+                            
+                            <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
+                                <span className="text-xs text-slate-500 italic">
+                                    Exibindo {filteredAnomalies.length} de {result.anomalies.length} anomalias
+                                </span>
+                                <button
+                                    onClick={handleCopyAnomalies}
+                                    className="px-3 py-1.5 text-xs font-medium text-white bg-indigo-500 hover:bg-indigo-600 rounded flex items-center gap-1 transition-colors"
+                                >
+                                    <ShareIcon className="w-3 h-3" />
+                                    {anomaliesCopyStatus}
+                                </button>
                             </div>
                         </div>
                         {filteredAnomalies.length > 0 ? (

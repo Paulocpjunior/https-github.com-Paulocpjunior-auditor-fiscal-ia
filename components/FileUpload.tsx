@@ -1,8 +1,9 @@
+
 import React, { useState, useCallback } from 'react';
 import { UploadIcon } from './icons/UploadIcon';
 
 interface FileUploadProps {
-  onFileSelect: (file: File) => void;
+  onFileSelect: (files: File[]) => void;
   disabled: boolean;
 }
 
@@ -11,7 +12,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, disabled }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      onFileSelect(e.target.files[0]);
+      const fileList = Array.from(e.target.files);
+      onFileSelect(fileList);
     }
   };
 
@@ -37,7 +39,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, disabled }
     e.stopPropagation();
     setIsDragging(false);
     if (!disabled && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      onFileSelect(e.dataTransfer.files[0]);
+      const fileList = Array.from(e.dataTransfer.files);
+      onFileSelect(fileList);
     }
   }, [disabled, onFileSelect]);
 
@@ -67,9 +70,17 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, disabled }
           <p className="mb-2 text-sm text-slate-500 dark:text-slate-400">
             <span className="font-semibold">Clique para fazer upload</span> ou arraste e solte
           </p>
-          <p className="text-xs text-slate-500 dark:text-slate-400">XML ou PDF (MAX. 10MB)</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400">XML ou PDF (MAX. 10MB) - Selecione um ou mais arquivos</p>
         </div>
-        <input id="dropzone-file" type="file" className="hidden" onChange={handleFileChange} accept=".xml,.pdf" disabled={disabled} />
+        <input 
+          id="dropzone-file" 
+          type="file" 
+          className="hidden" 
+          onChange={handleFileChange} 
+          accept=".xml,.pdf" 
+          multiple
+          disabled={disabled} 
+        />
       </label>
     </div>
   );

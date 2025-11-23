@@ -3,11 +3,14 @@ import { GoogleGenAI, Type } from "@google/genai";
 import type { AuditResult, ChatMessage, GroundingSource } from '../types';
 import type { CompanyData } from './cnpjService';
 
-if (!process.env.API_KEY) {
-  throw new Error("API_KEY environment variable not set");
-}
-
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Helper function to safely get the AI client or throw a context-aware error
+const getAiClient = () => {
+    // API Key must be obtained exclusively from the environment variable process.env.API_KEY
+    if (!process.env.API_KEY) {
+        throw new Error("API Key is missing. Please configure the API_KEY environment variable in your project settings.");
+    }
+    return new GoogleGenAI({ apiKey: process.env.API_KEY });
+};
 
 const auditResponseSchema = {
   type: Type.OBJECT,
@@ -79,6 +82,7 @@ export async function analyzeDocument(
     officialEmitterData?: CompanyData | null,
     officialTakerData?: CompanyData | null
 ): Promise<AuditResult> {
+  const ai = getAiClient();
   const model = "gemini-2.5-flash";
 
   // Format official data for the prompt if available
@@ -184,6 +188,7 @@ export async function getChatResponse(history: ChatMessage[], newMessage: string
 }
 
 async function getStandardChatResponse(history: ChatMessage[], newMessage: string, auditResult: AuditResult | null): Promise<{ text: string; sources: GroundingSource[] }> {
+    const ai = getAiClient();
     const model = 'gemini-2.5-flash';
     const systemInstruction = createSystemInstruction(auditResult);
 
@@ -213,6 +218,7 @@ async function getStandardChatResponse(history: ChatMessage[], newMessage: strin
 
 
 async function getGroundedChatResponse(newMessage: string): Promise<{ text: string; sources: GroundingSource[] }> {
+    const ai = getAiClient();
     const model = 'gemini-2.5-flash';
     const prompt = `Com base nas informações mais recentes da web, responda à seguinte pergunta sobre tributação brasileira: "${newMessage}"`;
 

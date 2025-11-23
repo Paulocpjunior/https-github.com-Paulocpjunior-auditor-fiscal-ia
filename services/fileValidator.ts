@@ -20,6 +20,13 @@ const validateIdFormat = (idNode: Element | undefined, type: 'CNPJ' | 'CPF', con
     return null;
 }
 
+const parseMoney = (text: string | null | undefined): number => {
+    if (!text) return 0;
+    // Handles typical XML formats (dot for decimals) or PT-BR (comma) if mixed
+    // Typically XML uses dot.
+    return parseFloat(text.replace(',', '.'));
+}
+
 const validateXML = async (file: File): Promise<ValidationResult> => {
     if (file.size === 0) {
         return { isValid: false, error: 'O arquivo XML está vazio.' };
@@ -131,7 +138,7 @@ const validateXML = async (file: File): Promise<ValidationResult> => {
         }
         // -------------------------------------
 
-        // Validate Emitter CNPJ (CPF is technically possible for rural producers, but rare in corporate audit)
+        // Validate Emitter CNPJ
         const emitCnpj = emitTags[0].getElementsByTagName('CNPJ')[0];
         const emitCpf = emitTags[0].getElementsByTagName('CPF')[0];
         
@@ -144,6 +151,11 @@ const validateXML = async (file: File): Promise<ValidationResult> => {
         } else {
             return { isValid: false, error: 'NFe inválida: Emitente deve possuir CNPJ ou CPF.' };
         }
+
+        // --- Tax Regime Validation (CRT) ---
+        const crtNode = emitTags[0].getElementsByTagName('CRT')[0];
+        const crt = crtNode ? crtNode.textContent?.trim() : null;
+        // CRT: 1 = Simples Nacional, 2 = Simples Excess Sublimite, 3 = Regime Normal
 
         // Validate Destination/Taker
         const destTags = infNFeNode.getElementsByTagName('dest');
@@ -158,10 +170,6 @@ const validateXML = async (file: File): Promise<ValidationResult> => {
             } else if (destCpf) {
                 const err = validateIdFormat(destCpf, 'CPF', 'Destinatário NFe');
                 if (err) return { isValid: false, error: err };
-            } else if (!idEstrangeiro) {
-                // Not necessarily an error (NFCe without ID), but for NFe audit usually expected.
-                // We won't block validation if ID is missing unless strictly required context is known,
-                // but if tags exist, they must be valid.
             }
         }
 
@@ -187,17 +195,11 @@ const validateXML = async (file: File): Promise<ValidationResult> => {
             }
 
             // 2. Logic/Category Check
-            // Special Case: "00000000" is strictly used for services in NFe (when permitted by municipal/federal rules)
             if (ncmContent !== "00000000") {
                 const chapter = parseInt(ncmContent.substring(0, 2), 10);
-                
-                // Chapter 00 does not exist for goods (only the special 00000000 service code allowed above)
                 if (chapter === 0) {
-                     return { isValid: false, error: `Item ${nItem}: NCM '${ncmContent}' suspeito. O capítulo '00' não é válido para mercadorias (apenas '00000000' é aceito para serviços em casos específicos).` };
+                     return { isValid: false, error: `Item ${nItem}: NCM '${ncmContent}' suspeito. O capítulo '00' não é válido para mercadorias.` };
                 }
-
-                // Chapters go from 01 to 97 generally. 98 is special baggage/exports. 99 is special.
-                // Anything strictly above 99 is impossible in current SH structure.
                 if (chapter > 99) {
                     return { isValid: false, error: `Item ${nItem}: NCM '${ncmContent}' inválido. O capítulo (primeiros dois dígitos) não existe na Tabela TIPI/SH.` };
                 }
@@ -221,13 +223,35 @@ const validateXML = async (file: File): Promise<ValidationResult> => {
                 const vUnCom = parseFloat(vUnComNode[0].textContent);
                 if (!isNaN(qCom) && !isNaN(vUnCom)) {
                     const calculatedTotal = qCom * vUnCom;
-                    // Use a small tolerance for floating point comparison (0.01 for currency)
-                    // We verify if the XML total matches Quantity * Unit Price
                     if (Math.abs(calculatedTotal - vProd) > 0.01) {
                         return { 
                             isValid: false, 
-                            error: `Inconsistência de cálculo no Item ${nItem}: O valor total do produto (vProd=${vProd.toFixed(2)}) diverge do cálculo Quantidade (${qCom}) x Valor Unitário (${vUnCom.toFixed(4)}) = ${calculatedTotal.toFixed(2)}. Diferença: ${Math.abs(calculatedTotal - vProd).toFixed(4)}.` 
+                            error: `Inconsistência de cálculo no Item ${nItem}: O valor total do produto (vProd=${vProd.toFixed(2)}) diverge do cálculo Quantidade (${qCom}) x Valor Unitário (${vUnCom.toFixed(4)}) = ${calculatedTotal.toFixed(2)}.` 
                         };
+                    }
+                }
+            }
+
+            // --- Tax Regime Consistency Check per Item ---
+            if (detNode) {
+                const imposto = detNode.getElementsByTagName('imposto')[0];
+                if (imposto) {
+                    const icms = imposto.getElementsByTagName('ICMS')[0];
+                    if (icms) {
+                        // Check child tags of ICMS (e.g., ICMSSN101, ICMS00)
+                        const icmsChildren = Array.from(icms.children);
+                        const hasCSOSN = icmsChildren.some(child => child.getElementsByTagName('CSOSN').length > 0 || child.tagName.includes('ICMSSN'));
+                        const hasCST = icmsChildren.some(child => child.getElementsByTagName('CST').length > 0 || child.tagName.includes('ICMS00') || child.tagName.includes('ICMS20'));
+
+                        if (crt === '1') { // Simples Nacional
+                            if (hasCST && !hasCSOSN) {
+                                return { isValid: false, error: `Inconsistência Tributária no Item ${nItem}: Emitente é Simples Nacional (CRT=1), mas o item utiliza CST (Regime Normal) em vez de CSOSN. Verifique a tributação.` };
+                            }
+                        } else if (crt === '3') { // Regime Normal
+                            if (hasCSOSN) {
+                                return { isValid: false, error: `Inconsistência Tributária no Item ${nItem}: Emitente é Regime Normal (CRT=3), mas o item utiliza CSOSN (Simples Nacional). Utilize CST.` };
+                            }
+                        }
                     }
                 }
             }
@@ -237,12 +261,9 @@ const validateXML = async (file: File): Promise<ValidationResult> => {
     }
     
     // --- NFSe VALIDATION ---
-    // Checks for <NFSe>, <CompNfse>, <Nfse> root elements (common patterns)
     if (rootName === 'NFSe' || rootName === 'Nfse' || rootName === 'CompNfse') {
         const infNfseNodes = doc.getElementsByTagName('InfNfse');
         if (infNfseNodes.length === 0) {
-            // Some layouts use different capitalization or no InfNfse wrapper immediately
-            // But strict validation requires identifying the core structure
             return { isValid: false, error: 'Estrutura NFSe inválida: A tag <InfNfse> não foi encontrada.' };
         }
 
@@ -255,24 +276,19 @@ const validateXML = async (file: File): Promise<ValidationResult> => {
         const prestadorNode = prestadorTags[0];
         const identPrestador = prestadorNode.getElementsByTagName('IdentificacaoPrestador')[0];
         
-        // Some formats place CNPJ directly under PrestadorServico, others under IdentificacaoPrestador
-        // Logic: Try strictly IdentificacaoPrestador first as per best practice standards (ABRASF)
         if (identPrestador) {
             const prestadorCnpj = identPrestador.getElementsByTagName('Cnpj')[0];
             const prestadorCpf = identPrestador.getElementsByTagName('Cpf')[0];
-            
             if (prestadorCnpj) {
-                 const err = validateIdFormat(prestadorCnpj, 'CNPJ', 'Prestador NFSe (IdentificacaoPrestador)');
+                 const err = validateIdFormat(prestadorCnpj, 'CNPJ', 'Prestador NFSe');
                  if (err) return { isValid: false, error: err };
             } else if (prestadorCpf) {
-                 const err = validateIdFormat(prestadorCpf, 'CPF', 'Prestador NFSe (IdentificacaoPrestador)');
+                 const err = validateIdFormat(prestadorCpf, 'CPF', 'Prestador NFSe');
                  if (err) return { isValid: false, error: err };
             }
         } else {
-             // Fallback for flat structures, but if missing ID tag completely, warn
              const prestadorCnpj = prestadorNode.getElementsByTagName('Cnpj')[0];
              const prestadorCpf = prestadorNode.getElementsByTagName('Cpf')[0];
-             
              if (prestadorCnpj) {
                   const err = validateIdFormat(prestadorCnpj, 'CNPJ', 'Prestador NFSe');
                   if (err) return { isValid: false, error: err };
@@ -287,20 +303,17 @@ const validateXML = async (file: File): Promise<ValidationResult> => {
         if (tomadorTags.length > 0) {
             const tomadorNode = tomadorTags[0];
             const identTomador = tomadorNode.getElementsByTagName('IdentificacaoTomador')[0];
-
             if (identTomador) {
                 const tomadorCnpj = identTomador.getElementsByTagName('Cnpj')[0];
                 const tomadorCpf = identTomador.getElementsByTagName('Cpf')[0];
-                
                 if (tomadorCnpj) {
-                    const err = validateIdFormat(tomadorCnpj, 'CNPJ', 'Tomador NFSe (IdentificacaoTomador)');
+                    const err = validateIdFormat(tomadorCnpj, 'CNPJ', 'Tomador NFSe');
                     if (err) return { isValid: false, error: err };
                 } else if (tomadorCpf) {
-                    const err = validateIdFormat(tomadorCpf, 'CPF', 'Tomador NFSe (IdentificacaoTomador)');
+                    const err = validateIdFormat(tomadorCpf, 'CPF', 'Tomador NFSe');
                     if (err) return { isValid: false, error: err };
                 }
             } else {
-                // Fallback
                 const tomadorCnpj = tomadorNode.getElementsByTagName('Cnpj')[0];
                 const tomadorCpf = tomadorNode.getElementsByTagName('Cpf')[0];
                 if (tomadorCnpj) {
@@ -313,14 +326,124 @@ const validateXML = async (file: File): Promise<ValidationResult> => {
             }
         }
 
+        // DataEmissao Check
+        const dataEmissao = infNfseNode.getElementsByTagName('DataEmissao')[0];
+        if (!dataEmissao || !dataEmissao.textContent?.trim()) {
+            return { isValid: false, error: 'NFSe inválida: A tag <DataEmissao> é obrigatória e não foi encontrada ou está vazia.' };
+        }
+
         // Service check
-        const hasServico = infNfseNode.getElementsByTagName('Servico').length > 0;
-        if (!hasServico) return { isValid: false, error: 'NFSe inválida: Tag <Servico> ausente.' };
+        const servicoTags = infNfseNode.getElementsByTagName('Servico');
+        if (servicoTags.length === 0) return { isValid: false, error: 'NFSe inválida: Tag <Servico> ausente.' };
+        const servicoNode = servicoTags[0];
+
+        const discriminacao = servicoNode.getElementsByTagName('Discriminacao')[0] || 
+                              servicoNode.getElementsByTagName('DiscriminacaoServico')[0];
+        
+        if (!discriminacao || !discriminacao.textContent?.trim()) {
+            return { isValid: false, error: 'NFSe inválida: A descrição do serviço (<Discriminacao>) não foi encontrada ou está vazia.' };
+        }
+
+        // ISS Values and Rate Check
+        const valoresTags = servicoNode.getElementsByTagName('Valores');
+        const valuesContext = valoresTags.length > 0 ? valoresTags[0] : servicoNode;
+
+        const valorIss = valuesContext.getElementsByTagName('ValorIss')[0] || valuesContext.getElementsByTagName('ValorIssqn')[0];
+        const aliquota = valuesContext.getElementsByTagName('Aliquota')[0];
+
+        if (!valorIss) {
+             return { isValid: false, error: 'NFSe inválida: Tag <ValorIss> não encontrada nos detalhes do serviço.' };
+        }
+        if (isNaN(parseFloat(valorIss.textContent?.replace(',', '.') || ''))) {
+            return { isValid: false, error: 'NFSe inválida: O conteúdo de <ValorIss> deve ser um número válido.' };
+        }
+
+        if (!aliquota) {
+            return { isValid: false, error: 'NFSe inválida: Tag <Aliquota> não encontrada nos detalhes do serviço.' };
+        }
+        
+        const aliquotaRaw = aliquota.textContent?.replace(',', '.') || '';
+        let aliquotaVal = parseFloat(aliquotaRaw);
+
+        if (isNaN(aliquotaVal)) {
+            return { isValid: false, error: 'NFSe inválida: O conteúdo de <Aliquota> deve ser um número válido.' };
+        }
+        
+        let ratePercent = aliquotaVal;
+        if (aliquotaVal > 0 && aliquotaVal <= 1) {
+            ratePercent = aliquotaVal * 100;
+        }
+
+        if (ratePercent < 2 || ratePercent > 5) {
+             return { 
+                 isValid: false, 
+                 error: `Aviso de Validação NFSe: A Alíquota de ISS identificada (${ratePercent.toFixed(2)}%) está fora do intervalo padrão de 2% a 5% (ou 0% onde não permitido).` 
+             };
+        }
+
+        // --- Tax Regime & Withholding Check (NFSe) ---
+        const optanteSimplesNode = infNfseNode.getElementsByTagName('OptanteSimplesNacional')[0];
+        const optanteSimples = optanteSimplesNode ? optanteSimplesNode.textContent?.trim() : null; // 1 = Sim, 2 = Não
+        
+        // ISS Retido Check
+        const issRetidoNode = valuesContext.getElementsByTagName('IssRetido')[0] || servicoNode.getElementsByTagName('IssRetido')[0];
+        const issRetido = issRetidoNode ? issRetidoNode.textContent?.trim() : null; // 1 = Sim, 2 = Não
+        const valorIssRetidoNode = valuesContext.getElementsByTagName('ValorIssRetido')[0];
+        const valorIssRetido = parseMoney(valorIssRetidoNode?.textContent);
+
+        if (issRetido === '1' && valorIssRetido <= 0) {
+            return { isValid: false, error: `Inconsistência de Retenção NFSe: O campo 'IssRetido' indica SIM (1), mas o 'ValorIssRetido' é zero ou ausente.` };
+        }
+
+        // Federal Withholdings Check (Approximate Rates)
+        const vServicosNode = valuesContext.getElementsByTagName('ValorServicos')[0];
+        const vServicos = parseMoney(vServicosNode?.textContent);
+
+        if (vServicos > 0) {
+            const vPis = parseMoney(valuesContext.getElementsByTagName('ValorPis')[0]?.textContent);
+            const vCofins = parseMoney(valuesContext.getElementsByTagName('ValorCofins')[0]?.textContent);
+            const vInss = parseMoney(valuesContext.getElementsByTagName('ValorInss')[0]?.textContent);
+            const vIr = parseMoney(valuesContext.getElementsByTagName('ValorIr')[0]?.textContent);
+            const vCsll = parseMoney(valuesContext.getElementsByTagName('ValorCsll')[0]?.textContent);
+
+            // Simples Nacional Check
+            if (optanteSimples === '1') {
+                if (vPis > 0 || vCofins > 0 || vCsll > 0) {
+                     return { isValid: false, error: `Aviso de Regime Tributário: Emitente optante pelo Simples Nacional, mas há retenções federais (PIS/COFINS/CSLL) destacadas. Geralmente, empresas do Simples pagam tributos via DAS e não sofrem retenção na fonte desses tributos (exceto ISS em alguns casos).` };
+                }
+            } else {
+                // Approximate checks for Normal Regime (Warning level via Error message prefix logic in UI if needed, currently blocking)
+                // We use high tolerance because base calculation might be reduced (e.g. construction)
+                // Standard: PIS 0.65%, COFINS 3%, CSLL 1%, IR 1.5%
+                
+                // Helper to check rate plausibility (if value exists)
+                const checkRate = (val: number, standardRate: number, name: string) => {
+                    if (val > 0) {
+                        const calculatedRate = val / vServicos;
+                        // If calculated rate is > 2x standard or simply way off (e.g. decimal error), flag it.
+                        // Example: PIS is 0.65% (0.0065). If we find 6.5% (0.065), it's likely a decimal error.
+                        if (calculatedRate > (standardRate * 5)) { // Very loose upper bound to catch gross errors
+                            return `Erro de Cálculo Probável (${name}): O valor destacado (${val}) representa ${(calculatedRate*100).toFixed(2)}% do serviço, muito acima da alíquota padrão de ${(standardRate*100).toFixed(2)}%.`;
+                        }
+                    }
+                    return null;
+                };
+
+                const pisErr = checkRate(vPis, 0.0065, 'PIS');
+                if (pisErr) return { isValid: false, error: pisErr };
+
+                const cofinsErr = checkRate(vCofins, 0.03, 'COFINS');
+                if (cofinsErr) return { isValid: false, error: cofinsErr };
+
+                const csllErr = checkRate(vCsll, 0.01, 'CSLL');
+                if (csllErr) return { isValid: false, error: csllErr };
+            }
+        }
 
         return { isValid: true };
     }
 
-    return { isValid: false, error: 'O arquivo XML não parece ser uma NFe, CTe ou NFSe válida. A estrutura principal (tags raiz como nfeProc, NFe, cteProc, CTe ou NFSe) não foi encontrada ou não segue o padrão esperado.' };
+    return { isValid: false, error: 'O arquivo XML não parece ser uma NFe, CTe ou NFSe válida. A estrutura principal não foi encontrada.' };
 };
 
 const validatePDF = async (file: File): Promise<ValidationResult> => {
@@ -331,7 +454,6 @@ const validatePDF = async (file: File): Promise<ValidationResult> => {
         'CHAVE DE ACESSO', 'PROTOCOLO DE AUTORIZAÇÃO'
     ];
     // Lowered count to 1 to avoid false negatives on valid PDFs where text extraction is difficult.
-    // The AI is better suited for full content validation.
     const MIN_KEYWORD_COUNT = 1; 
 
     if (file.size === 0) {

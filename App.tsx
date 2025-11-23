@@ -19,7 +19,12 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [currentFile, setCurrentFile] = useState<File | null>(null);
 
-  const handleFileAudit = useCallback(async (file: File) => {
+  const handleFileAudit = useCallback(async (files: File[]) => {
+    if (files.length === 0) return;
+
+    // Currently processing the first file. Future implementations can handle queues.
+    const file = files[0];
+    
     setIsLoading(true);
     setError(null);
     setAuditResult(null);
@@ -218,7 +223,7 @@ const App: React.FC = () => {
               Desenvolvido BY - SP Assessoria Contabil
             </p>
             <p className="mt-4 text-lg text-slate-600 dark:text-slate-400">
-              Faça upload de um documento fiscal (XML ou PDF) para uma análise tributária inteligente.
+              Faça upload de um ou mais documentos fiscais (XML ou PDF) para uma análise tributária inteligente.
             </p>
           </div>
 

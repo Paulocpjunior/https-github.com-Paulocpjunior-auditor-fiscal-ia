@@ -18,6 +18,10 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [currentFile, setCurrentFile] = useState<File | null>(null);
+  
+  // State to hold official data fetched from API
+  const [officialEmitterData, setOfficialEmitterData] = useState<CompanyData | null>(null);
+  const [officialTakerData, setOfficialTakerData] = useState<CompanyData | null>(null);
 
   const handleFileAudit = useCallback(async (files: File[]) => {
     if (files.length === 0) return;
@@ -28,6 +32,8 @@ const App: React.FC = () => {
     setIsLoading(true);
     setError(null);
     setAuditResult(null);
+    setOfficialEmitterData(null);
+    setOfficialTakerData(null);
     setCurrentFile(file);
 
     const { isValid, error: validationError } = await validateFile(file);
@@ -95,92 +101,134 @@ const App: React.FC = () => {
       let takerName: string | null = null;
 
       if (file.name.toLowerCase().endsWith('.xml')) {
-        const parser = new DOMParser();
-        const xmlDoc = parser.parseFromString(fileContent, "application/xml");
-        const rootElement = xmlDoc.documentElement;
+        try {
+          const parser = new DOMParser();
+          const xmlDoc = parser.parseFromString(fileContent, "application/xml");
+          
+          const errorNode = xmlDoc.querySelector("parsererror");
+          if (errorNode) {
+              console.warn("XML Parsing Error found, defaulting to raw text analysis:", errorNode.textContent);
+          } else {
+              const rootElement = xmlDoc.documentElement;
 
-        // Helper to find a direct child by its local name (namespace-agnostic)
-        const findChild = (el: Element | undefined | null, localName: string): Element | undefined => {
-          if (!el) return undefined;
-          return Array.from(el.children).find(child => child.localName === localName);
-        };
-        
-        // Helper to get text content from a path of local names
-        // Uses findChild to be namespace safe
-        const getTextContent = (baseElement: Element | undefined | null, path: string[]): string | null => {
-            let current = baseElement;
-            for (const tagName of path) {
-                current = findChild(current, tagName);
-                if (!current) return null;
-            }
-            return current?.textContent ?? null;
-        };
+              // Helper to find a direct child by its local name (namespace-agnostic)
+              // Accepts string or array of strings for localName to handle variations
+              const findChild = (el: Element | undefined | null, localNames: string | string[]): Element | undefined => {
+                if (!el) return undefined;
+                const names = Array.isArray(localNames) ? localNames : [localNames];
+                return Array.from(el.children).find(child => names.includes(child.localName));
+              };
+              
+              // Helper to get text content from a path of local names
+              const getTextContent = (baseElement: Element | undefined | null, path: (string|string[])[]): string | null => {
+                  let current = baseElement;
+                  for (const step of path) {
+                      current = findChild(current, step);
+                      if (!current) return null;
+                  }
+                  return current?.textContent?.trim() ?? null;
+              };
 
-        const getFirstContent = (baseElement: Element | undefined | null, paths: string[][]): string | null => {
-            for (const path of paths) {
-                const result = getTextContent(baseElement, path);
-                if (result) return result;
-            }
-            return null;
-        };
-        
-        const rootTagName = rootElement.localName;
+              // Helper to attempt multiple paths
+              const getFirstContent = (baseElement: Element | undefined | null, paths: (string|string[])[][]): string | null => {
+                  for (const path of paths) {
+                      const result = getTextContent(baseElement, path);
+                      if (result) return result;
+                  }
+                  return null;
+              };
+              
+              const rootTagName = rootElement.localName;
 
-        if (rootTagName === 'nfeProc' || rootTagName === 'NFe') {
-            const nfeBase = rootTagName === 'nfeProc' ? findChild(rootElement, 'NFe') : rootElement;
-            const infNFe = findChild(nfeBase, 'infNFe');
+              if (rootTagName === 'nfeProc' || rootTagName === 'NFe') {
+                  const nfeBase = rootTagName === 'nfeProc' ? findChild(rootElement, 'NFe') : rootElement;
+                  const infNFe = findChild(nfeBase, 'infNFe');
 
-            companyName = getTextContent(infNFe, ['emit', 'xNome']);
-            emitterCnpj = getTextContent(infNFe, ['emit', 'CNPJ']);
-            
-            // Try different paths for date (NFe 3.10 uses dhEmi, 2.0 uses dEmi)
-            documentDate = getFirstContent(infNFe, [['ide', 'dhEmi'], ['ide', 'dEmi']]);
-            
-            takerName = getTextContent(infNFe, ['dest', 'xNome']);
-            // Taker might be CNPJ or CPF
-            takerCnpj = getFirstContent(infNFe, [['dest', 'CNPJ'], ['dest', 'CPF']]);
+                  if (infNFe) {
+                      companyName = getTextContent(infNFe, ['emit', 'xNome']);
+                      emitterCnpj = getTextContent(infNFe, ['emit', 'CNPJ']);
+                      documentDate = getFirstContent(infNFe, [['ide', 'dhEmi'], ['ide', 'dEmi']]);
+                      
+                      takerName = getTextContent(infNFe, ['dest', 'xNome']);
+                      takerCnpj = getFirstContent(infNFe, [['dest', 'CNPJ'], ['dest', 'CPF']]);
+                  }
 
-        } else if (rootTagName === 'cteProc' || rootTagName === 'CTe') {
-            const cteBase = rootTagName === 'cteProc' ? findChild(rootElement, 'CTe') : rootElement;
-            const infCte = findChild(cteBase, 'infCte');
+              } else if (rootTagName === 'cteProc' || rootTagName === 'CTe') {
+                  const cteBase = rootTagName === 'cteProc' ? findChild(rootElement, 'CTe') : rootElement;
+                  const infCte = findChild(cteBase, 'infCte');
 
-            companyName = getTextContent(infCte, ['emit', 'xNome']);
-            emitterCnpj = getTextContent(infCte, ['emit', 'CNPJ']);
-            documentDate = getTextContent(infCte, ['ide', 'dhEmi']);
-            
-            // CTe taker can be rem, dest, exped, receb, or tomador
-            // usually 'dest' is the recipient, but 'toma' defines the payer
-            takerName = getFirstContent(infCte, [['dest', 'xNome'], ['rem', 'xNome']]);
-            takerCnpj = getFirstContent(infCte, [['dest', 'CNPJ'], ['dest', 'CPF'], ['rem', 'CNPJ'], ['rem', 'CPF']]);
-            
-        } else if (rootTagName === 'NFSe' || rootTagName === 'CompNfse') { 
-            // Handle ABRASF and other NFSe variations
-            // Sometimes CompNfse wraps Nfse
-            const nfseNode = rootTagName === 'CompNfse' ? findChild(rootElement, 'Nfse') : rootElement;
-            const infNfse = findChild(nfseNode, 'InfNfse');
-            
-            documentDate = getTextContent(infNfse, ['DataEmissao']);
-            companyName = getTextContent(infNfse, ['PrestadorServico', 'RazaoSocial']);
-            emitterCnpj = getTextContent(infNfse, ['PrestadorServico', 'IdentificacaoPrestador', 'Cnpj']);
-            
-            takerName = getTextContent(infNfse, ['TomadorServico', 'RazaoSocial']);
-            takerCnpj = getFirstContent(infNfse, [
-                ['TomadorServico', 'IdentificacaoTomador', 'Cnpj'],
-                ['TomadorServico', 'IdentificacaoTomador', 'Cpf']
-            ]);
+                  if (infCte) {
+                      companyName = getTextContent(infCte, ['emit', 'xNome']);
+                      emitterCnpj = getTextContent(infCte, ['emit', 'CNPJ']);
+                      documentDate = getTextContent(infCte, ['ide', 'dhEmi']);
+                      
+                      // Taker logic tries dest, rem, then generic toma logic
+                      takerName = getFirstContent(infCte, [['dest', 'xNome'], ['rem', 'xNome']]);
+                      takerCnpj = getFirstContent(infCte, [['dest', 'CNPJ'], ['dest', 'CPF'], ['rem', 'CNPJ'], ['rem', 'CPF']]);
+                  }
+                  
+              } else {
+                  // NFSe and other formats (ABRASF, etc)
+                  let infNfse = findChild(rootElement, 'InfNfse'); 
+                  
+                  if (!infNfse) {
+                      // Check inside CompNfse
+                      const comp = findChild(rootElement, 'CompNfse');
+                      if (comp) {
+                           const nfse = findChild(comp, 'Nfse');
+                           infNfse = findChild(nfse, 'InfNfse');
+                      }
+                  }
+
+                  if (!infNfse) {
+                      // Check inside generic Nfse root
+                       const nfse = findChild(rootElement, ['Nfse', 'NFS-e']);
+                       if (nfse) infNfse = findChild(nfse, ['InfNfse', 'InfNFS-e']);
+                  }
+                  
+                  if (infNfse) {
+                      documentDate = getTextContent(infNfse, ['DataEmissao']);
+                      companyName = getFirstContent(infNfse, [
+                          ['PrestadorServico', 'RazaoSocial'],
+                          ['Prestador', 'RazaoSocial']
+                      ]);
+                      emitterCnpj = getFirstContent(infNfse, [
+                          ['PrestadorServico', 'IdentificacaoPrestador', 'Cnpj'],
+                          ['Prestador', 'Cnpj'],
+                          ['PrestadorServico', 'Cnpj']
+                      ]);
+                      
+                      takerName = getFirstContent(infNfse, [
+                          ['TomadorServico', 'RazaoSocial'],
+                          ['Tomador', 'RazaoSocial']
+                      ]);
+                      takerCnpj = getFirstContent(infNfse, [
+                          ['TomadorServico', 'IdentificacaoTomador', 'Cnpj'],
+                          ['TomadorServico', 'IdentificacaoTomador', 'Cpf'],
+                          ['Tomador', 'Cnpj'],
+                          ['Tomador', 'Cpf']
+                      ]);
+                  }
+              }
+          }
+        } catch (xmlEx) {
+           console.warn("Exception during XML extraction:", xmlEx);
+           // Fallback: Proceed with just the raw fileContent analysis
         }
       }
       
       // Fetch official company data if CNPJs are available
-      let officialEmitterData: CompanyData | null = null;
-      let officialTakerData: CompanyData | null = null;
+      let fetchedEmitterData: CompanyData | null = null;
+      let fetchedTakerData: CompanyData | null = null;
 
       // Clean CNPJ strings before fetching (remove punctuation)
       if (emitterCnpj) {
-        officialEmitterData = await fetchCompanyData(emitterCnpj.replace(/\D/g, ''));
+        fetchedEmitterData = await fetchCompanyData(emitterCnpj.replace(/\D/g, ''));
+        setOfficialEmitterData(fetchedEmitterData);
       }
       if (takerCnpj && takerCnpj.replace(/\D/g, '').length === 14) {
-        officialTakerData = await fetchCompanyData(takerCnpj.replace(/\D/g, ''));
+        fetchedTakerData = await fetchCompanyData(takerCnpj.replace(/\D/g, ''));
+        setOfficialTakerData(fetchedTakerData);
       }
 
       const result = await analyzeDocument(
@@ -190,8 +238,8 @@ const App: React.FC = () => {
           documentDate, 
           takerCnpj, 
           takerName,
-          officialEmitterData,
-          officialTakerData
+          fetchedEmitterData,
+          fetchedTakerData
       );
       
       setAuditResult(result);
@@ -209,6 +257,8 @@ const App: React.FC = () => {
     setAuditResult(null);
     setError(null);
     setCurrentFile(null);
+    setOfficialEmitterData(null);
+    setOfficialTakerData(null);
     setIsLoading(false);
   };
 
@@ -246,7 +296,13 @@ const App: React.FC = () => {
           )}
 
           {auditResult && !isLoading && (
-            <AuditResults result={auditResult} fileName={currentFile?.name || ''} onReset={handleReset} />
+            <AuditResults 
+              result={auditResult} 
+              fileName={currentFile?.name || ''} 
+              onReset={handleReset} 
+              officialEmitterData={officialEmitterData}
+              officialTakerData={officialTakerData}
+            />
           )}
 
         </div>

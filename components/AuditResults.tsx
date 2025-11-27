@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo, useCallback } from 'react';
 import type { AuditResult, Anomaly } from '../types';
+import type { CompanyData } from '../services/cnpjService';
 import { CheckCircleIcon } from './icons/CheckCircleIcon';
 import { XCircleIcon } from './icons/XCircleIcon';
 import { WarningIcon } from './icons/WarningIcon';
@@ -9,11 +10,14 @@ import { SparkleIcon } from './icons/SparkleIcon';
 import { DownloadIcon } from './icons/DownloadIcon';
 import { ShareIcon } from './icons/ShareIcon';
 import { ChevronDownIcon } from './icons/ChevronDownIcon';
+import { EyeIcon } from './icons/EyeIcon';
 
 interface AuditResultsProps {
   result: AuditResult;
   fileName: string;
   onReset: () => void;
+  officialEmitterData?: CompanyData | null;
+  officialTakerData?: CompanyData | null;
 }
 
 const getRiskColorClasses = (level: 'low' | 'medium' | 'high' | 'critical') => {
@@ -71,9 +75,10 @@ const FilterButton: React.FC<{label: string; value: string; isActive: boolean; o
     </button>
 );
 
-export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, onReset }) => {
+export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, onReset, officialEmitterData, officialTakerData }) => {
   const [filters, setFilters] = useState<{ type: string; severity: string }>({ type: 'all', severity: 'all' });
   const [showShareModal, setShowShareModal] = useState(false);
+  const [selectedCompany, setSelectedCompany] = useState<CompanyData | null>(null);
   const [copyStatus, setCopyStatus] = useState('Copiar para Área de Transferência');
   const [anomaliesCopyStatus, setAnomaliesCopyStatus] = useState('Compartilhar Anomalias');
   const [openSection, setOpenSection] = useState<'anomalies' | 'recommendations' | null>(
@@ -371,8 +376,23 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b border-slate-200 dark:border-slate-700">
         <div>
             <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Resultado da Auditoria</h2>
-            {result.companyName && <p className="text-lg font-semibold text-indigo-600 dark:text-indigo-400">{result.companyName}</p>}
-             <div className="flex flex-wrap items-center text-sm text-slate-500 dark:text-slate-400 gap-x-4 mt-1">
+            
+            {result.companyName && (
+              <div className="flex items-center flex-wrap gap-2 mt-2">
+                <p className="text-lg font-semibold text-indigo-600 dark:text-indigo-400">{result.companyName}</p>
+                {officialEmitterData && (
+                  <button 
+                    onClick={() => setSelectedCompany(officialEmitterData)}
+                    className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-indigo-700 bg-indigo-100 rounded-md hover:bg-indigo-200 dark:bg-indigo-900 dark:text-indigo-300 dark:hover:bg-indigo-800 transition-colors"
+                  >
+                    <EyeIcon className="w-3 h-3" />
+                    Verificar Detalhes
+                  </button>
+                )}
+              </div>
+            )}
+             
+             <div className="flex flex-col text-sm text-slate-500 dark:text-slate-400 gap-y-1 mt-2">
                 <p className="truncate" title={fileName}>
                     <strong>Arquivo:</strong> {fileName}
                 </p>
@@ -381,15 +401,24 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
                         <strong>Data:</strong> {formatDate(result.documentDate)}
                      </p>
                 )}
-                {result.takerName && (
-                    <p>
-                        <strong>Nome Tomador:</strong> {result.takerName}
-                    </p>
-                )}
-                {result.takerCnpj && (
-                    <p>
-                        <strong>CNPJ Tomador:</strong> {result.takerCnpj}
-                    </p>
+                
+                {(result.takerName || result.takerCnpj) && (
+                  <div className="mt-1 p-2 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-semibold text-slate-700 dark:text-slate-300">Tomador / Destinatário:</span>
+                      {officialTakerData && (
+                        <button 
+                          onClick={() => setSelectedCompany(officialTakerData)}
+                          className="flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-indigo-700 bg-indigo-100 rounded-md hover:bg-indigo-200 dark:bg-indigo-900 dark:text-indigo-300 dark:hover:bg-indigo-800 transition-colors"
+                        >
+                          <EyeIcon className="w-3 h-3" />
+                          Detalhes
+                        </button>
+                      )}
+                    </div>
+                    {result.takerName && <p>{result.takerName}</p>}
+                    {result.takerCnpj && <p className="font-mono text-xs">{result.takerCnpj}</p>}
+                  </div>
                 )}
             </div>
         </div>
@@ -528,6 +557,64 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
         </div>
       </div>
     </div>
+
+    {/* Company Details Modal */}
+    {selectedCompany && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 animate-fade-in" onClick={() => setSelectedCompany(null)}>
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
+                <div className="p-5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/50 flex justify-between items-center">
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">Detalhes Oficiais da Empresa</h3>
+                    <button onClick={() => setSelectedCompany(null)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
+                </div>
+                <div className="p-6 overflow-y-auto max-h-[70vh]">
+                    <div className="space-y-4">
+                        <div>
+                            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Razão Social</p>
+                            <p className="text-base text-slate-900 dark:text-slate-200 font-medium">{selectedCompany.razao_social}</p>
+                        </div>
+                        {selectedCompany.nome_fantasia && (
+                          <div>
+                              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Nome Fantasia</p>
+                              <p className="text-base text-slate-900 dark:text-slate-200">{selectedCompany.nome_fantasia}</p>
+                          </div>
+                        )}
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">CNPJ</p>
+                                <p className="text-base font-mono text-slate-900 dark:text-slate-200">{selectedCompany.cnpj}</p>
+                            </div>
+                             <div>
+                                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Situação Cadastral</p>
+                                <p className={`text-base font-bold ${selectedCompany.situacao_cadastral === 'ATIVA' ? 'text-green-600' : 'text-red-600'}`}>
+                                  {selectedCompany.situacao_cadastral}
+                                </p>
+                            </div>
+                        </div>
+                        <div>
+                            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Atividade Principal (CNAE)</p>
+                            <p className="text-sm text-slate-900 dark:text-slate-200">{selectedCompany.cnae_fiscal_descricao}</p>
+                        </div>
+                        <div className="pt-4 border-t border-slate-100 dark:border-slate-700">
+                            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Endereço</p>
+                            <p className="text-sm text-slate-900 dark:text-slate-200">
+                                {selectedCompany.logradouro}, {selectedCompany.numero} {selectedCompany.bairro && `- ${selectedCompany.bairro}`}
+                            </p>
+                            <p className="text-sm text-slate-900 dark:text-slate-200">
+                                {selectedCompany.municipio} - {selectedCompany.uf}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                <div className="p-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/30 text-right">
+                    <button onClick={() => setSelectedCompany(null)} className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-md transition-colors">
+                        Fechar
+                    </button>
+                </div>
+            </div>
+        </div>
+    )}
 
     {showShareModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 animate-fade-in" onClick={() => setShowShareModal(false)}>

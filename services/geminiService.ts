@@ -2,6 +2,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import type { AuditResult, ChatMessage, GroundingSource, UserTaxRates } from '../types';
 import type { CompanyData } from './cnpjService';
+import { fetchNcmData } from './ncmService';
 
 // Helper function to safely get the AI client or throw a context-aware error
 const getAiClient = () => {
@@ -43,6 +44,20 @@ const auditResponseSchema = {
         type: Type.STRING,
         description: "A detailed short paragraph (3-5 sentences) summarizing the audit findings, highlighting critical issues, tax inconsistencies, and the overall risk assessment in Portuguese."
     },
+    analyzedNcms: {
+      type: Type.ARRAY,
+      description: "Analysis of NCM codes found in the document compared to official data.",
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          code: { type: Type.STRING },
+          descriptionInDocument: { type: Type.STRING, description: "Description of the item/service as found in the document text." },
+          officialDescription: { type: Type.STRING, description: "Official NCM description provided in the system prompt context." },
+          status: { type: Type.STRING, enum: ['valid', 'invalid', 'unknown', 'divergent'] },
+          analysis: { type: Type.STRING, description: "Brief analysis of the match between the item and the NCM code." }
+        }
+      }
+    },
     anomalies: {
       type: Type.ARRAY,
       description: "A list of identified anomalies or inconsistencies in the document.",
@@ -56,6 +71,7 @@ const auditResponseSchema = {
           message: { type: Type.STRING, description: "A detailed description of the anomaly in Portuguese." },
           expected: { type: Type.STRING, description: "The expected value or state." },
           found: { type: Type.STRING, description: "The value found in the document." },
+          legalBasis: { type: Type.STRING, description: "A base legal, artigo de lei ou norma específica infringida (Ex: Art. 10 da LC 116/03). Se não houver, deixe vazio." }
         },
         required: ["type", "severity", "code", "message"]
       }
@@ -71,11 +87,22 @@ const auditResponseSchema = {
   required: ["riskScore", "riskLevel", "summary", "anomalies", "recommendations", "companyName", "documentDate"]
 };
 
+// Extract potential 8-digit codes that look like NCMs
+function extractPotentialNcms(content: string): string[] {
+  // Regex to find 8 digit numbers, allowing for dots (e.g., 1234.56.78 or 12345678)
+  // We filter specifically for XML tags <NCM> or common text patterns "NCM 12345678"
+  const regex = /(?:<NCM>|NCM[:\s]*|N\.C\.M[:\s]*)(\d{4}\.?\d{2}\.?\d{2})/gi;
+  const matches = [...content.matchAll(regex)];
+  
+  const codes = matches.map(m => m[1].replace(/\D/g, ''));
+  // Deduplicate
+  return [...new Set(codes)];
+}
 
 export async function analyzeDocument(
     fileContent: string, 
     fileName: string, 
-    images: string[] = [], // New parameter for scanned PDF pages
+    images: string[] = [], 
     companyName?: string | null, 
     documentDate?: string | null, 
     takerCnpj?: string | null, 
@@ -83,10 +110,35 @@ export async function analyzeDocument(
     officialEmitterData?: CompanyData | null,
     officialTakerData?: CompanyData | null,
     municipality?: string | null,
-    userTaxRates?: UserTaxRates // New parameter for manual tax refinement
+    userTaxRates?: UserTaxRates
 ): Promise<AuditResult> {
   const ai = getAiClient();
   const model = "gemini-2.5-flash";
+
+  // --- NCM Enrichment Step ---
+  // 1. Extract potential NCMs from text
+  const potentialNcms = extractPotentialNcms(fileContent);
+  
+  // 2. Fetch official data for them in parallel
+  const ncmPromises = potentialNcms.map(async (code) => {
+    const data = await fetchNcmData(code);
+    return { code, data };
+  });
+  
+  const ncmResults = await Promise.all(ncmPromises);
+  
+  // 3. Build context string
+  let ncmContextStr = "";
+  if (ncmResults.length > 0) {
+    ncmContextStr = "\n    - **CONSULTA API EXTERNA (NCM)**: Foram identificados códigos NCM no texto. Compare a descrição do documento com a descrição oficial abaixo:\n";
+    ncmResults.forEach(res => {
+      if (res.data) {
+        ncmContextStr += `      * Código ${res.code}: Descrição Oficial="${res.data.descricao}", Ato="${res.data.tipo_ato} ${res.data.numero_ato}".\n`;
+      } else {
+        ncmContextStr += `      * Código ${res.code}: NÃO ENCONTRADO na base oficial do Brasil (Possível código inválido ou obsoleto).\n`;
+      }
+    });
+  }
 
   // Format official data for the prompt if available
   const officialEmitterStr = officialEmitterData 
@@ -124,6 +176,7 @@ export async function analyzeDocument(
     - Nome do tomador/destinatário: "${takerName || 'Não extraído (Busque no conteúdo/imagem)'}"
     ${municipalityStr}
     ${officialEmitterStr}${officialTakerStr}
+    ${ncmContextStr}
     ${userRatesStr}
 
     Conteúdo do documento (Texto Extraído):
@@ -137,7 +190,10 @@ export async function analyzeDocument(
     3.  **CRÍTICO: Validação Cadastral**: Se foram fornecidos "DADOS OFICIAIS" acima, compare-os com os dados dentro do documento. 
         - Se a Razão Social do documento for muito diferente da oficial, gere um alerta (Warning).
         - Se a Situação Cadastral oficial não for "ATIVA", gere um erro (Error) grave.
-    4.  Verifique a validade de campos chave como CNPJ, Chave de Acesso, NCM, CFOP.
+    4.  **VALIDAÇÃO NCM**: Utilize a seção "CONSULTA API EXTERNA (NCM)" acima.
+        - Para cada item, verifique se o NCM usado existe na base oficial. Se constar como "NÃO ENCONTRADO", gere uma anomalia (Error).
+        - Compare a descrição do item no documento com a "Descrição Oficial". Se forem totalmente discrepantes (ex: NCM de "Parafuso" usado para "Serviço de Consultoria" ou "Leite"), gere uma anomalia (Warning ou Error dependendo da gravidade).
+        - Preencha o campo 'analyzedNcms' no JSON com essa análise detalhada.
     5.  Valide todos os cálculos de impostos (ICMS, IPI, PIS, COFINS, ISS). **Se o usuário informou alíquotas manuais, utilize-as para validar o valor calculado.**
     6.  Regra do STF: O ICMS deve ser EXCLUÍDO da base de cálculo do PIS/COFINS.
     7.  Identifique retenções na fonte necessárias (IRRF, CSLL, INSS).
@@ -148,8 +204,9 @@ export async function analyzeDocument(
         - **Tomador LUCRO REAL**: Verifique rigorosamente se há aproveitamento de crédito de PIS/COFINS (entrada de insumos). Se o Prestador for Simples Nacional, verifique a possibilidade legal do crédito (Lei Complementar 123). Se o Prestador for Regime Normal (Lucro Presumido/Real), o crédito é geralmente permitido.
         - **Prestador LUCRO PRESUMIDO/REAL**: Verifique alíquotas cheias de PIS (0.65% ou 1.65%) e COFINS (3% ou 7.6%).
         - **Desenquadramento**: Se o Prestador parece ser MEI/Simples mas usa alíquotas de regime normal, aponte ERRO CRÍTICO de desenquadramento.
-    10. Atribua um 'riskScore' (0-100) e 'riskLevel'.
-    11. Responda estritamente no formato JSON especificado, em português brasileiro.
+    10. **BASE LEGAL**: Sempre que apontar uma anomalia, tente citar a 'legalBasis' (ex: Artigo de Lei, IN, Convênio) que justifica o apontamento.
+    11. Atribua um 'riskScore' (0-100) e 'riskLevel'.
+    12. Responda estritamente no formato JSON especificado, em português brasileiro.
   `;
 
   const requestParts: any[] = [{ text: prompt }];
@@ -169,7 +226,7 @@ export async function analyzeDocument(
   try {
     const response = await ai.models.generateContent({
       model,
-      contents: { parts: requestParts }, // Pass parts array which can include text and images
+      contents: { parts: requestParts }, 
       config: {
         responseMimeType: "application/json",
         responseSchema: auditResponseSchema,

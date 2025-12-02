@@ -63,38 +63,59 @@ const isValidCNPJ = (cnpj: string): boolean => {
     return true;
 };
 
-// --- Helper to validate numeric ID format and checksum ---
-const validateId = (idNode: Element | undefined, type: 'CNPJ' | 'CPF', context: string): string | null => {
-    if (!idNode) return null; // Missing node is handled by structural checks usually
-    const val = idNode.textContent?.trim() || '';
-    
-    if (type === 'CNPJ') {
-        if (!isValidCNPJ(val)) {
-            return `${context}: O CNPJ '${val}' é inválido (dígitos verificadores incorretos).`;
-        }
-    } else if (type === 'CPF') {
-        if (!isValidCPF(val)) {
-            return `${context}: O CPF '${val}' é inválido (dígitos verificadores incorretos).`;
-        }
-    }
-    return null;
-}
-
 const getByLocalName = (root: Element | Document, localName: string): Element[] => {
     const results: Element[] = [];
     const allElements = root.getElementsByTagName("*");
     for (let i = 0; i < allElements.length; i++) {
-        if (allElements[i].localName === localName) {
+        // Case insensitive comparison for robustness
+        if (allElements[i].localName?.toLowerCase() === localName.toLowerCase()) {
             results.push(allElements[i]);
         }
     }
     return results;
 };
 
-const getOne = (root: Element | Document, localNames: string[]): Element | null => {
-    for (const name of localNames) {
-        const found = getByLocalName(root, name);
-        if (found.length > 0) return found[0];
+// Helper to determine the context of an element based on its parent
+const getContextName = (element: Element): string => {
+    const parent = element.parentElement;
+    if (!parent) return 'Desconhecido';
+    
+    const parentName = parent.localName?.toLowerCase() || '';
+    
+    if (parentName.includes('emit') || parentName.includes('prest')) return 'Emitente/Prestador';
+    if (parentName.includes('dest') || parentName.includes('tom')) return 'Destinatário/Tomador';
+    if (parentName.includes('rem')) return 'Remetente';
+    if (parentName.includes('transp')) return 'Transportadora';
+    
+    return `<${parent.localName}>`;
+};
+
+const validateCNPJs = (doc: Document): string | null => {
+    const nodes = getByLocalName(doc, 'CNPJ');
+    
+    for (const node of nodes) {
+        const val = node.textContent?.trim() || '';
+        if (val.length === 0) continue;
+
+        if (!isValidCNPJ(val)) {
+            const context = getContextName(node);
+            return `CNPJ inválido encontrado (${context}): '${val}'. Verifique se os dígitos estão corretos.`;
+        }
+    }
+    return null;
+};
+
+const validateCPFs = (doc: Document): string | null => {
+    const nodes = getByLocalName(doc, 'CPF');
+    
+    for (const node of nodes) {
+        const val = node.textContent?.trim() || '';
+        if (val.length === 0) continue;
+
+        if (!isValidCPF(val)) {
+            const context = getContextName(node);
+            return `CPF inválido encontrado (${context}): '${val}'. Verifique se os dígitos estão corretos.`;
+        }
     }
     return null;
 };
@@ -132,15 +153,24 @@ const validateXML = async (file: File): Promise<ValidationResult> => {
         return { isValid: false, error: 'O arquivo XML está malformado ou corrompido. Verifique a estrutura do arquivo.' };
     }
 
-    // Simplified Validation: If it's valid XML and contains *some* key tax tags, let it pass to AI.
-    // We don't want to be stricter than the AI's ability to interpret.
-    
     const hasTaxTags = [
-        'NFe', 'CTe', 'Nfse', 'Rps', 'Lote', 'Prestador', 'Tomador', 'Emit', 'Dest', 'Servico'
+        'NFe', 'CTe', 'Nfse', 'Rps', 'Lote', 'Prestador', 'Tomador', 'Emit', 'Dest', 'Servico', 'InfNfe'
     ].some(tag => getByLocalName(doc, tag).length > 0 || text.includes(tag));
 
     if (hasTaxTags) {
-         // Specific NCM Validation
+         // 1. Validate CNPJs specifically
+         const cnpjError = validateCNPJs(doc);
+         if (cnpjError) {
+             return { isValid: false, error: cnpjError };
+         }
+
+         // 2. Validate CPFs specifically
+         const cpfError = validateCPFs(doc);
+         if (cpfError) {
+             return { isValid: false, error: cpfError };
+         }
+
+         // 3. Specific NCM Validation
          const ncmError = validateNCM(doc);
          if (ncmError) {
              return { isValid: false, error: ncmError };
@@ -149,17 +179,11 @@ const validateXML = async (file: File): Promise<ValidationResult> => {
          return { isValid: true };
     }
 
-    return { isValid: false, error: 'O arquivo XML não parece ser um documento fiscal reconhecido (NFe, CTe, NFSe).' };
+    return { isValid: false, error: 'O arquivo XML não parece ser um documento fiscal reconhecido (NFe, CTe, NFSe). Tags fiscais essenciais não foram encontradas.' };
 };
 
 const validatePDF = async (file: File): Promise<ValidationResult> => {
-    const FISCAL_KEYWORDS = [
-        'CNPJ', 'DANFE', 'NFS-e', 'CT-e', 'NOTA FISCAL', 'IMPOSTO',
-        'BASE DE CÁLCULO', 'ICMS', 'ISS', 'PIS', 'COFINS', 'VALOR TOTAL',
-        'CHAVE DE ACESSO', 'PROTOCOLO DE AUTORIZAÇÃO'
-    ];
-    const MIN_KEYWORD_COUNT = 1; 
-
+    // Validates PDF header magic numbers
     if (file.size === 0) {
         return { isValid: false, error: 'O arquivo PDF está vazio.' };
     }

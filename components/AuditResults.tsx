@@ -26,16 +26,23 @@ interface AuditResultsProps {
 const getRiskColorClasses = (level: 'low' | 'medium' | 'high' | 'critical') => {
   switch (level) {
     case 'low':
-      return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300';
+      return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 border-green-200 dark:border-green-800';
     case 'medium':
-      return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300';
+      return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800';
     case 'high':
-      return 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300';
+      return 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300 border-orange-200 dark:border-orange-800';
     case 'critical':
-      return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300';
+      return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300 border-red-200 dark:border-red-800';
     default:
-      return 'bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-300';
+      return 'bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-300 border-slate-200';
   }
+};
+
+const getRiskProgressColor = (score: number) => {
+    if (score < 30) return 'bg-green-500';
+    if (score < 60) return 'bg-yellow-500';
+    if (score < 85) return 'bg-orange-500';
+    return 'bg-red-600';
 };
 
 const getAnomalyIcon = (type: 'error' | 'warning' | 'info') => {
@@ -48,18 +55,43 @@ const getAnomalyIcon = (type: 'error' | 'warning' | 'info') => {
 }
 
 const AnomalyItem: React.FC<{ anomaly: Anomaly }> = ({ anomaly }) => (
-    <div className="p-3 bg-slate-50 dark:bg-slate-700/50 rounded-lg border border-slate-200 dark:border-slate-600/50">
+    <div className="p-4 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm transition-all hover:shadow-md">
         <div className="flex items-start space-x-3">
-            {getAnomalyIcon(anomaly.type)}
+            <div className="mt-1">{getAnomalyIcon(anomaly.type)}</div>
             <div className="flex-1">
-                <p className="font-semibold text-slate-800 dark:text-slate-200">{anomaly.message}</p>
-                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400 grid grid-cols-2 gap-x-4 gap-y-1">
-                    <p><span className="font-medium">Severidade:</span> <span className={`capitalize ${getRiskColorClasses(anomaly.severity)} px-1.5 py-0.5 rounded-full text-xs`}>{anomaly.severity}</span></p>
-                    <p><span className="font-medium">Código:</span> {anomaly.code}</p>
-                    {anomaly.field && <p><span className="font-medium">Campo:</span> {anomaly.field}</p>}
-                    {anomaly.expected && <p><span className="font-medium">Esperado:</span> {anomaly.expected}</p>}
-                    {anomaly.found && <p><span className="font-medium">Encontrado:</span> <span className="font-mono bg-slate-200 dark:bg-slate-600 px-1 rounded">{anomaly.found}</span></p>}
+                <p className="font-semibold text-slate-800 dark:text-slate-200 leading-snug">{anomaly.message}</p>
+                
+                <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                     <span className={`px-2 py-0.5 rounded-full font-medium uppercase tracking-wide border ${
+                        anomaly.severity === 'critical' ? 'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800' :
+                        anomaly.severity === 'high' ? 'bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/30 dark:text-orange-300 dark:border-orange-800' :
+                        anomaly.severity === 'medium' ? 'bg-yellow-50 text-yellow-700 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-300 dark:border-yellow-800' :
+                        'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-300 dark:border-green-800'
+                     }`}>
+                        {anomaly.severity}
+                     </span>
+                     <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-600">
+                        Cód: {anomaly.code}
+                     </span>
+                     {anomaly.field && (
+                        <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-600">
+                            Campo: {anomaly.field}
+                        </span>
+                     )}
                 </div>
+
+                {anomaly.legalBasis && (
+                    <div className="mt-2 text-xs text-indigo-600 dark:text-indigo-400">
+                        <span className="font-bold">Base Legal:</span> {anomaly.legalBasis}
+                    </div>
+                )}
+
+                {(anomaly.expected || anomaly.found) && (
+                    <div className="mt-2 text-xs grid grid-cols-1 sm:grid-cols-2 gap-2 p-2 bg-slate-50 dark:bg-slate-900/50 rounded border border-slate-100 dark:border-slate-700">
+                         {anomaly.expected && <p><span className="font-bold text-slate-500">Esperado:</span> <span className="text-slate-700 dark:text-slate-300">{anomaly.expected}</span></p>}
+                         {anomaly.found && <p><span className="font-bold text-slate-500">Encontrado:</span> <span className="font-mono text-red-600 dark:text-red-400">{anomaly.found}</span></p>}
+                    </div>
+                )}
             </div>
         </div>
     </div>
@@ -68,10 +100,10 @@ const AnomalyItem: React.FC<{ anomaly: Anomaly }> = ({ anomaly }) => (
 const FilterButton: React.FC<{label: string; value: string; isActive: boolean; onClick: (value: string) => void}> = ({ label, value, isActive, onClick }) => (
     <button
         onClick={() => onClick(value)}
-        className={`px-3 py-1 text-xs rounded-full transition-colors font-medium ${
+        className={`px-3 py-1 text-xs rounded-full transition-all font-medium border ${
         isActive
-            ? 'bg-indigo-600 text-white shadow-sm'
-            : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
+            ? 'bg-indigo-600 border-indigo-600 text-white shadow-md transform scale-105'
+            : 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'
         }`}
     >
         {label}
@@ -191,13 +223,190 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
     doc.text('Relatório de Auditoria Fiscal AI', 105, currentY, { align: 'center' });
     currentY += 12;
 
+    // ... (Export logic maintained)
     doc.setFontSize(10);
+    doc.setTextColor('#34495e');
+    doc.setFont('helvetica', 'normal');
+    
     doc.text(`Arquivo: ${fileName}`, 14, currentY);
     currentY += 6;
-    doc.text(`Risco: ${result.riskLevel} (${result.riskScore})`, 14, currentY);
+    doc.text(`Empresa: ${result.companyName || 'Não informado'}`, 14, currentY);
+    currentY += 6;
+    doc.text(`Data Documento: ${formatDate(result.documentDate)}`, 14, currentY);
+    currentY += 6;
     
+    let riskColor = '#2c3e50';
+    if (result.riskLevel === 'high' || result.riskLevel === 'critical') riskColor = '#c0392b';
+    if (result.riskLevel === 'medium') riskColor = '#d35400';
+    
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(riskColor);
+    doc.text(`Risco: ${result.riskLevel.toUpperCase()} (Pontuação: ${result.riskScore}/100)`, 14, currentY);
+    currentY += 10;
+
+    doc.setTextColor('#2c3e50');
+    doc.setFontSize(14);
+    doc.text('Sumário Executivo', 14, currentY);
+    doc.setLineWidth(0.5);
+    doc.line(14, currentY + 2, 196, currentY + 2);
+    currentY += 8;
+
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor('#34495e');
+    const summaryLines = doc.splitTextToSize(result.summary, 180);
+    doc.text(summaryLines, 14, currentY);
+    currentY += (summaryLines.length * 5) + 8;
+
+    // ... (Existing NCM table logic)
+    if (result.analyzedNcms && result.analyzedNcms.length > 0) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(14);
+        doc.setTextColor('#2c3e50');
+        doc.text('Análise de Códigos NCM (BrasilAPI)', 14, currentY);
+        doc.line(14, currentY + 2, 196, currentY + 2);
+        currentY += 4;
+
+        const ncmColumns = ["NCM", "Descrição Doc.", "Descrição Oficial", "Status", "Análise"];
+        const ncmRows = result.analyzedNcms.map(ncm => [
+            ncm.code,
+            ncm.descriptionInDocument || '-',
+            ncm.officialDescription || 'N/A',
+            ncm.status.toUpperCase(),
+            ncm.analysis
+        ]);
+
+        (doc as any).autoTable({
+            startY: currentY + 2,
+            head: [ncmColumns],
+            body: ncmRows,
+            theme: 'striped',
+            headStyles: { fillColor: '#8e44ad', textColor: '#ffffff' },
+            styles: { fontSize: 8, cellPadding: 2 },
+            columnStyles: {
+                0: { cellWidth: 15 },
+                1: { cellWidth: 35 },
+                2: { cellWidth: 40 },
+                3: { cellWidth: 15 },
+                4: { cellWidth: 'auto' }
+            }
+        });
+        currentY = (doc as any).lastAutoTable.finalY + 10;
+    }
+
+    // --- ANOMALIES TABLE ---
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.setTextColor('#2c3e50');
+    doc.text('Anomalias Identificadas', 14, currentY);
+    doc.line(14, currentY + 2, 196, currentY + 2);
+    currentY += 4;
+
+    if (result.anomalies.length > 0) {
+        // Added "Base Legal" to columns
+        const anomColumns = ["Gravidade", "Tipo", "Mensagem", "Base Legal", "Campo", "Valor"];
+        const anomRows = result.anomalies.map(a => [
+            a.severity.toUpperCase(),
+            a.type.toUpperCase(),
+            a.message,
+            a.legalBasis || '-', // Include legal basis data
+            a.field || '-',
+            a.found || '-'
+        ]);
+
+        (doc as any).autoTable({
+            startY: currentY + 2,
+            head: [anomColumns],
+            body: anomRows,
+            theme: 'grid',
+            headStyles: { fillColor: '#c0392b', textColor: '#ffffff' },
+            styles: { fontSize: 8, cellPadding: 2 },
+            columnStyles: {
+                0: { cellWidth: 20 },
+                1: { cellWidth: 15 },
+                2: { cellWidth: 'auto' },
+                3: { cellWidth: 25 }, // Base Legal Column Width
+                4: { cellWidth: 20 },
+                5: { cellWidth: 20 }
+            },
+            didParseCell: (data: any) => {
+                // Formatting for Severity
+                if (data.section === 'body' && data.column.index === 0) {
+                    const text = data.cell.text[0];
+                    if (text === 'CRITICAL') data.cell.styles.textColor = '#c0392b';
+                    else if (text === 'HIGH') data.cell.styles.textColor = '#d35400';
+                    else if (text === 'MEDIUM') data.cell.styles.textColor = '#f39c12';
+                    else data.cell.styles.textColor = '#27ae60';
+                }
+                // Formatting for Legal Basis Link Look
+                if (data.section === 'body' && data.column.index === 3) {
+                    const text = data.cell.text[0];
+                    if (text && text !== '-') {
+                        data.cell.styles.textColor = '#0000EE'; // Link Blue
+                        data.cell.styles.fontStyle = 'underline'; // Looks like a link
+                    }
+                }
+            },
+            // Hook to make the text a clickable link
+            didDrawCell: (data: any) => {
+                if (data.section === 'body' && data.column.index === 3) {
+                   const text = data.cell.text[0];
+                   if (text && text !== '-') {
+                       // Create a Google Search link for the legal basis
+                       const url = `https://www.google.com/search?q=${encodeURIComponent(text + " legislação tributária")}`;
+                       doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url });
+                   }
+                }
+            }
+        });
+        currentY = (doc as any).lastAutoTable.finalY + 10;
+    } else {
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'italic');
+        doc.text("Nenhuma anomalia crítica detectada.", 14, currentY + 6);
+        currentY += 15;
+    }
+
+    if (currentY > 250) {
+        doc.addPage();
+        currentY = 20;
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.setTextColor('#2c3e50');
+    doc.text('Recomendações', 14, currentY);
+    doc.line(14, currentY + 2, 196, currentY + 2);
+    currentY += 8;
+
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor('#34495e');
+
+    if (result.recommendations.length > 0) {
+        result.recommendations.forEach(rec => {
+             if (currentY > 275) {
+                doc.addPage();
+                currentY = 20;
+            }
+            const lines = doc.splitTextToSize(`• ${rec}`, 180);
+            doc.text(lines, 14, currentY);
+            currentY += (lines.length * 5) + 2;
+        });
+    } else {
+        doc.text("Sem recomendações específicas.", 14, currentY);
+    }
+    
+    const pageCount = (doc as any).internal.getNumberOfPages();
+    for(let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor('#95a5a6');
+        doc.text(`Página ${i} de ${pageCount} - Gerado por Auditor Fiscal AI`, 105, 290, { align: 'center' });
+    }
+
     const safeFileName = fileName.replace(/[^a-z0-9.]/gi, '_').toLowerCase();
-    doc.save(`auditoria_${safeFileName}.pdf`);
+    doc.save(`auditoria_detalhada_${safeFileName}.pdf`);
   };
     
   const handleShare = async () => {
@@ -210,7 +419,6 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
         await navigator.share(shareData);
       } catch (err) {
         console.error("Share failed:", err);
-        // Only show modal if error is NOT an abort (user cancellation)
         if (err instanceof Error && err.name === 'AbortError') {
             return;
         }
@@ -258,210 +466,226 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
   return (
     <>
     <div className="bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 p-6 animate-fade-in">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b border-slate-200 dark:border-slate-700">
-        <div>
-            <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Resultado da Auditoria</h2>
+      {/* Header Section */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-6 border-b border-slate-200 dark:border-slate-700">
+        <div className="flex-1 min-w-0">
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <SparkleIcon className="text-indigo-500 w-6 h-6" /> Resultado da Auditoria
+            </h2>
             
             {result.companyName && (
-              <div className="flex items-center flex-wrap gap-2 mt-2">
-                <p className="text-lg font-semibold text-indigo-600 dark:text-indigo-400">{result.companyName}</p>
-                {officialEmitterData && (
-                  <button 
-                    onClick={() => handleOpenCompanyModal(officialEmitterData)}
-                    className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-indigo-700 bg-indigo-100 rounded-md hover:bg-indigo-200 dark:bg-indigo-900 dark:text-indigo-300 dark:hover:bg-indigo-800 transition-colors"
-                  >
-                    <EyeIcon className="w-3 h-3" />
-                    Verificar Detalhes
-                  </button>
-                )}
+              <div className="mt-2 space-y-1">
+                 <div className="flex items-center flex-wrap gap-2">
+                    <p className="text-lg font-semibold text-indigo-700 dark:text-indigo-400 truncate">{result.companyName}</p>
+                    {officialEmitterData && (
+                    <button 
+                        onClick={() => handleOpenCompanyModal(officialEmitterData)}
+                        className="flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-white bg-indigo-500 rounded-full hover:bg-indigo-600 transition-colors"
+                        title="Ver dados oficiais da Receita Federal"
+                    >
+                        <EyeIcon className="w-3 h-3" />
+                        Ver Oficial
+                    </button>
+                    )}
+                 </div>
+                 <div className="text-sm text-slate-500 dark:text-slate-400 flex flex-wrap gap-x-4">
+                    <span><strong>Arquivo:</strong> {fileName}</span>
+                    {result.documentDate && <span><strong>Data:</strong> {formatDate(result.documentDate)}</span>}
+                 </div>
               </div>
             )}
-             
-             <div className="flex flex-col text-sm text-slate-500 dark:text-slate-400 gap-y-1 mt-2">
-                <p className="truncate" title={fileName}>
-                    <strong>Arquivo:</strong> {fileName}
-                </p>
-                {result.documentDate && (
-                     <p>
-                        <strong>Data:</strong> {formatDate(result.documentDate)}
-                     </p>
-                )}
-                
-                {(result.takerName || result.takerCnpj) && (
-                  <div className="mt-1 p-2 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-semibold text-slate-700 dark:text-slate-300">Tomador / Destinatário:</span>
-                      {officialTakerData && (
-                        <button 
-                          onClick={() => handleOpenCompanyModal(officialTakerData)}
-                          className="flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-indigo-700 bg-indigo-100 rounded-md hover:bg-indigo-200 dark:bg-indigo-900 dark:text-indigo-300 dark:hover:bg-indigo-800 transition-colors"
-                        >
-                          <EyeIcon className="w-3 h-3" />
-                          Detalhes
-                        </button>
-                      )}
-                    </div>
-                    {result.takerName && <p>{result.takerName}</p>}
-                    {result.takerCnpj && <p className="font-mono text-xs">{result.takerCnpj}</p>}
-                  </div>
-                )}
-            </div>
         </div>
-        <div className="flex items-center gap-2 mt-4 sm:mt-0 flex-wrap">
+
+        <div className="flex items-center gap-2 mt-4 sm:mt-0">
             <button
               onClick={handleShare}
-              className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-200 hover:bg-slate-300 dark:bg-slate-600 dark:text-slate-200 dark:hover:bg-slate-500 rounded-md transition-colors flex items-center gap-2"
+              className="px-3 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-600 rounded-md transition-colors flex items-center gap-2 shadow-sm"
             >
               <ShareIcon className="w-4 h-4" />
               Compartilhar
             </button>
             <button
               onClick={handleExport}
-              className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-600 dark:text-white dark:hover:bg-indigo-700 rounded-md transition-colors flex items-center gap-2"
+              className="px-3 py-2 text-sm font-medium text-white bg-slate-800 hover:bg-slate-900 dark:bg-slate-600 dark:hover:bg-slate-500 rounded-md transition-colors flex items-center gap-2 shadow-sm"
             >
               <DownloadIcon className="w-4 h-4" />
-              Exportar PDF
+              PDF
             </button>
             <button
               onClick={onReset}
-              className="px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-100 hover:bg-indigo-200 dark:bg-indigo-900 dark:text-indigo-300 dark:hover:bg-indigo-800 rounded-md transition-colors"
+              className="px-3 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-300 dark:border-indigo-800 dark:hover:bg-indigo-900/50 rounded-md transition-colors"
             >
-              Analisar Outro
+              Novo
             </button>
         </div>
       </div>
 
+      {/* Taker Info Banner (if exists) */}
+      {(result.takerName || result.takerCnpj) && (
+          <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-md border border-blue-100 dark:border-blue-800 flex justify-between items-center">
+             <div>
+                <span className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">Tomador do Serviço</span>
+                <div className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                    {result.takerName || "Nome não identificado"} 
+                    {result.takerCnpj && <span className="ml-2 font-mono text-slate-500 dark:text-slate-400">({result.takerCnpj})</span>}
+                </div>
+             </div>
+             {officialTakerData && (
+                <button 
+                  onClick={() => handleOpenCompanyModal(officialTakerData)}
+                  className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 underline font-medium"
+                >
+                  Ver Detalhes Cadastrais
+                </button>
+             )}
+          </div>
+      )}
+
+      {/* KPI Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 my-6">
-        <div className={`p-4 rounded-lg ${getRiskColorClasses(result.riskLevel)}`}>
-          <h3 className="font-semibold">Nível de Risco</h3>
-          <p className="text-2xl font-bold capitalize">{result.riskLevel}</p>
+        {/* Risk Card */}
+        <div className={`p-5 rounded-lg border ${getRiskColorClasses(result.riskLevel)} shadow-sm relative overflow-hidden`}>
+          <div className="flex justify-between items-start mb-2">
+             <h3 className="font-semibold text-sm uppercase tracking-wide opacity-80">Risco Identificado</h3>
+             <span className="text-2xl font-bold capitalize">{result.riskLevel}</span>
+          </div>
+          
+          <div className="flex items-center gap-3 mt-4">
+            <div className="flex-1 h-3 bg-white/50 dark:bg-black/20 rounded-full overflow-hidden">
+                <div 
+                    className={`h-full ${getRiskProgressColor(result.riskScore)} transition-all duration-1000 ease-out`} 
+                    style={{ width: `${result.riskScore}%` }}
+                ></div>
+            </div>
+            <span className="font-mono font-bold text-xl">{result.riskScore}</span>
+          </div>
+          <p className="text-xs mt-1 opacity-70">Pontuação de 0 (Seguro) a 100 (Crítico)</p>
         </div>
-        <div className={`p-4 rounded-lg ${getRiskColorClasses(result.riskLevel)}`}>
-          <h3 className="font-semibold">Pontuação de Risco</h3>
-          <p className="text-2xl font-bold">{result.riskScore} / 100</p>
-        </div>
-        <div className="p-4 rounded-lg bg-slate-100 dark:bg-slate-700 md:col-span-1">
-          <h3 className="font-semibold text-slate-700 dark:text-slate-300">Resumo</h3>
-          <p className="text-sm text-slate-600 dark:text-slate-400">{result.summary}</p>
+
+        {/* Summary Card */}
+        <div className="md:col-span-2 p-5 rounded-lg bg-white dark:bg-slate-700/30 border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col justify-between">
+          <div>
+            <h3 className="font-semibold text-slate-700 dark:text-slate-200 mb-2 flex items-center gap-2">
+                <InfoIcon className="w-4 h-4 text-indigo-500"/> Análise Executiva
+            </h3>
+            <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{result.summary}</p>
+          </div>
         </div>
       </div>
       
-      {/* --- Refinement Section (Enhanced UI) --- */}
-      <div className="mb-6 p-5 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm ring-1 ring-slate-900/5 dark:ring-white/10">
+      {/* --- Refinement Section (Visual Enhanced) --- */}
+      <div className={`mb-8 rounded-xl border transition-all duration-300 ${showTaxInputs 
+          ? 'bg-white dark:bg-slate-800 border-indigo-200 dark:border-indigo-800 shadow-lg ring-1 ring-indigo-500/20' 
+          : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 hover:border-indigo-300 dark:hover:border-indigo-700'
+      }`}>
         <button 
           onClick={() => setShowTaxInputs(!showTaxInputs)}
-          className="w-full flex justify-between items-center text-sm font-semibold text-slate-800 dark:text-slate-200 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+          className="w-full flex justify-between items-center p-4 text-sm font-medium text-slate-700 dark:text-slate-200"
         >
-           <div className="flex items-center gap-2">
-             <div className="p-1.5 bg-indigo-100 dark:bg-indigo-900/50 rounded-md text-indigo-600 dark:text-indigo-400">
+           <div className="flex items-center gap-3">
+             <div className={`p-2 rounded-lg ${showTaxInputs ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-700 text-indigo-500 shadow-sm'}`}>
                 <SparkleIcon className="w-5 h-5" /> 
              </div>
-             <span>Refinar Análise com Dados Manuais</span>
+             <div className="text-left">
+                <p className="font-bold text-base">Refinar Análise Tributária</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-normal">
+                    Informe o Regime Tributário para validação precisa de créditos (PIS/COFINS) e retenções.
+                </p>
+             </div>
            </div>
-           <ChevronDownIcon className={`w-5 h-5 transition-transform duration-300 ${showTaxInputs ? 'rotate-180' : ''}`} />
+           <div className={`p-1.5 rounded-full ${showTaxInputs ? 'bg-indigo-50 text-indigo-600' : 'bg-transparent text-slate-400'}`}>
+                <ChevronDownIcon className={`w-5 h-5 transition-transform duration-300 ${showTaxInputs ? 'rotate-180' : ''}`} />
+           </div>
         </button>
         
         {showTaxInputs && (
-            <div className="mt-5 animate-fade-in-down">
-                <p className="text-sm text-slate-600 dark:text-slate-400 mb-4 bg-slate-50 dark:bg-slate-900/50 p-3 rounded border-l-4 border-indigo-500">
-                    Informe os regimes tributários e alíquotas para que a IA valide os créditos e retenções com precisão.
-                </p>
-                
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-4">
-                    {/* Coluna Regimes */}
+            <div className="p-5 border-t border-slate-100 dark:border-slate-700 animate-fade-in-down bg-gradient-to-b from-white to-slate-50 dark:from-slate-800 dark:to-slate-800/80">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    {/* Left Column: Prestador */}
                     <div className="space-y-4">
-                        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Regimes Tributários</h4>
+                        <div className="flex items-center gap-2 mb-2 pb-2 border-b border-slate-200 dark:border-slate-700">
+                             <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                             <h4 className="font-bold text-slate-700 dark:text-slate-200 text-sm">EMISSOR / PRESTADOR</h4>
+                        </div>
+                        
                         <div>
-                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                                Prestador do Serviço
+                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">
+                                Regime Tributário
                             </label>
                             <select
-                                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md dark:bg-slate-700 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow"
+                                className="w-full px-3 py-2.5 text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
                                 value={taxRates.providerRegime || ''}
                                 onChange={(e) => handleRegimeChange('providerRegime', e.target.value)}
                             >
-                                <option value="">Não informado / Automático</option>
+                                <option value="">-- Selecione --</option>
                                 {regimeOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                             </select>
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                                Tomador (Você/Cliente)
-                            </label>
-                            <select
-                                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md dark:bg-slate-700 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow"
-                                value={taxRates.takerRegime || ''}
-                                onChange={(e) => handleRegimeChange('takerRegime', e.target.value)}
-                            >
-                                <option value="">Não informado / Automático</option>
-                                {regimeOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                            </select>
+                            <p className="text-[10px] text-slate-400 mt-1">Ex: Simples Nacional não destaca IPI e tem restrição de créditos.</p>
                         </div>
                     </div>
 
-                    {/* Coluna Alíquotas */}
+                    {/* Right Column: Tomador */}
                     <div className="space-y-4">
-                        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Alíquotas Aplicáveis (%)</h4>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">ICMS</label>
-                                <input 
-                                    type="number" step="0.01" placeholder="Ex: 18"
-                                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md dark:bg-slate-700 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                                    value={taxRates.icms || ''}
-                                    onChange={(e) => handleTaxRateChange('icms', e.target.value)}
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">ISS</label>
-                                <input 
-                                    type="number" step="0.01" placeholder="Ex: 5"
-                                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md dark:bg-slate-700 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                                    value={taxRates.iss || ''}
-                                    onChange={(e) => handleTaxRateChange('iss', e.target.value)}
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">PIS</label>
-                                <input 
-                                    type="number" step="0.01" placeholder="Ex: 1.65"
-                                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md dark:bg-slate-700 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                                    value={taxRates.pis || ''}
-                                    onChange={(e) => handleTaxRateChange('pis', e.target.value)}
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">COFINS</label>
-                                <input 
-                                    type="number" step="0.01" placeholder="Ex: 7.6"
-                                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md dark:bg-slate-700 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                                    value={taxRates.cofins || ''}
-                                    onChange={(e) => handleTaxRateChange('cofins', e.target.value)}
-                                />
-                            </div>
+                        <div className="flex items-center gap-2 mb-2 pb-2 border-b border-slate-200 dark:border-slate-700">
+                             <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                             <h4 className="font-bold text-slate-700 dark:text-slate-200 text-sm">TOMADOR / CLIENTE</h4>
+                        </div>
+
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">
+                                Regime Tributário
+                            </label>
+                            <select
+                                className="w-full px-3 py-2.5 text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                                value={taxRates.takerRegime || ''}
+                                onChange={(e) => handleRegimeChange('takerRegime', e.target.value)}
+                            >
+                                <option value="">-- Selecione --</option>
+                                {regimeOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                            </select>
+                             <p className="text-[10px] text-slate-400 mt-1">Ex: Lucro Real pode aproveitar créditos de PIS/COFINS.</p>
                         </div>
                     </div>
                 </div>
 
-                <div className="mt-6 flex justify-end pt-4 border-t border-slate-100 dark:border-slate-700">
+                <div className="mt-6 pt-4 border-t border-slate-200 dark:border-slate-700">
+                     <h4 className="text-xs font-bold text-slate-500 uppercase mb-3">Conferência de Alíquotas (%)</h4>
+                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        {['icms', 'iss', 'pis', 'cofins'].map((tax) => (
+                            <div key={tax} className="relative">
+                                <label className="absolute -top-2 left-2 px-1 bg-white dark:bg-slate-800 text-[10px] font-bold text-slate-500 uppercase">
+                                    {tax}
+                                </label>
+                                <input 
+                                    type="number" step="0.01" 
+                                    className="w-full px-3 py-2 text-sm bg-transparent border border-slate-300 dark:border-slate-600 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                                    value={taxRates[tax as keyof UserTaxRates] || ''}
+                                    onChange={(e) => handleTaxRateChange(tax as keyof UserTaxRates, e.target.value)}
+                                />
+                            </div>
+                        ))}
+                     </div>
+                </div>
+
+                <div className="mt-6 flex justify-end">
                     <button 
                         onClick={handleRefineClick}
                         disabled={isLoading}
-                        className={`px-6 py-2.5 text-sm font-medium text-white rounded-md transition-all shadow-sm flex items-center gap-2
+                        className={`px-8 py-3 text-sm font-bold text-white rounded-lg transition-all shadow-md flex items-center gap-2
                             ${isLoading 
                                 ? 'bg-indigo-400 cursor-not-allowed' 
-                                : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-md transform hover:-translate-y-0.5'
+                                : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-lg hover:-translate-y-0.5'
                             }`}
                     >
                         {isLoading ? (
                             <>
                                 <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                                Recalculando...
+                                Processando Análise...
                             </>
                         ) : (
                             <>
-                                <SparkleIcon className="w-4 h-4" />
-                                Recalcular Auditoria
+                                <SparkleIcon className="w-5 h-5" />
+                                Atualizar Análise
                             </>
                         )}
                     </button>
@@ -472,63 +696,62 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
 
       <div className="mt-6 space-y-4">
         {/* Accordion for Anomalies */}
-        <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
+        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm overflow-hidden">
           <button
             onClick={() => toggleSection('anomalies')}
-            className="w-full flex justify-between items-center p-4 bg-slate-50 dark:bg-slate-700/50 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+            className="w-full flex justify-between items-center p-5 bg-slate-50/50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors"
             aria-expanded={openSection === 'anomalies'}
           >
-            <h3 className="text-lg font-semibold flex items-center text-slate-800 dark:text-slate-200">
-              <XCircleIcon className="w-6 h-6 mr-2 text-red-500"/> Anomalias Encontradas ({result.anomalies.length})
-            </h3>
-            <ChevronDownIcon className={`w-5 h-5 text-slate-500 dark:text-slate-400 transition-transform duration-300 ${openSection === 'anomalies' ? 'rotate-180' : ''}`} />
+            <div className="flex items-center gap-3">
+                 <div className="p-1.5 bg-red-100 text-red-600 rounded-lg dark:bg-red-900/30 dark:text-red-400">
+                    <XCircleIcon className="w-6 h-6"/> 
+                 </div>
+                 <div className="text-left">
+                     <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200">Anomalias Encontradas</h3>
+                     <p className="text-xs text-slate-500">{result.anomalies.length} pontos de atenção identificados</p>
+                 </div>
+            </div>
+            <ChevronDownIcon className={`w-5 h-5 text-slate-400 transition-transform duration-300 ${openSection === 'anomalies' ? 'rotate-180' : ''}`} />
           </button>
+          
           {openSection === 'anomalies' && (
-            <div className="p-4 border-t border-slate-200 dark:border-slate-700 animate-fade-in-down">
+            <div className="p-5 border-t border-slate-200 dark:border-slate-700 animate-fade-in-down bg-slate-50/30 dark:bg-slate-900/10">
                 {result.anomalies.length > 0 ? (
                     <>
-                        <div className="p-4 bg-slate-100 dark:bg-slate-900/50 rounded-lg space-y-3 mb-4 border border-slate-200 dark:border-slate-700">
-                            <div className="flex items-center gap-x-4 gap-y-2 flex-wrap">
-                                <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Filtrar por Tipo:</span>
-                                {Object.entries(typeFilters).map(([value, label]) => (
-                                    <FilterButton key={value} label={label} value={value} isActive={filters.type === value} onClick={(v) => handleFilterChange('type', v)} />
-                                ))}
-                            </div>
-                            <div className="flex items-center gap-x-4 gap-y-2 flex-wrap">
-                                <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Filtrar por Severidade:</span>
+                        <div className="flex flex-wrap gap-4 mb-6 pb-4 border-b border-slate-200 dark:border-slate-700">
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-slate-500 uppercase">Filtrar:</span>
                                 {Object.entries(severityFilters).map(([value, label]) => (
                                     <FilterButton key={value} label={label} value={value} isActive={filters.severity === value} onClick={(v) => handleFilterChange('severity', v)} />
                                 ))}
                             </div>
-                            
-                            <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
-                                <span className="text-xs text-slate-500 italic">
-                                    Exibindo {filteredAnomalies.length} de {result.anomalies.length} anomalias
-                                </span>
+                            <div className="flex-1 text-right">
                                 <button
                                     onClick={handleCopyAnomalies}
-                                    className="px-3 py-1.5 text-xs font-medium text-white bg-indigo-500 hover:bg-indigo-600 rounded flex items-center gap-1 transition-colors"
+                                    className="px-3 py-1.5 text-xs font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 dark:text-indigo-300 dark:bg-indigo-900/30 rounded inline-flex items-center gap-1 transition-colors"
                                 >
                                     <ShareIcon className="w-3 h-3" />
                                     {anomaliesCopyStatus}
                                 </button>
                             </div>
                         </div>
+                        
                         {filteredAnomalies.length > 0 ? (
-                            <div className="space-y-4">
+                            <div className="grid gap-4">
                                 {filteredAnomalies.map((anomaly, index) => <AnomalyItem key={index} anomaly={anomaly} />)}
                             </div>
                         ) : (
-                            <div className="flex items-center p-4 text-sm text-yellow-800 rounded-lg bg-yellow-50 dark:bg-slate-700 dark:text-yellow-400">
-                                <WarningIcon className="w-5 h-5 mr-2"/>
-                                Nenhuma anomalia corresponde aos filtros selecionados.
+                            <div className="text-center py-8 text-slate-500">
+                                <WarningIcon className="w-8 h-8 mx-auto mb-2 text-slate-300"/>
+                                <p>Nenhuma anomalia corresponde aos filtros selecionados.</p>
                             </div>
                         )}
                     </>
                 ) : (
-                    <div className="flex items-center p-4 text-sm text-green-800 rounded-lg bg-green-50 dark:bg-slate-700 dark:text-green-400">
-                    <CheckCircleIcon className="w-5 h-5 mr-2"/>
-                    Nenhuma anomalia encontrada. O documento parece estar em conformidade.
+                    <div className="flex flex-col items-center justify-center py-8 text-green-600">
+                        <CheckCircleIcon className="w-12 h-12 mb-3 opacity-80"/>
+                        <p className="font-semibold">Documento em conformidade!</p>
+                        <p className="text-sm opacity-70">Nenhuma anomalia crítica foi detectada.</p>
                     </div>
                 )}
             </div>
@@ -536,37 +759,45 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
         </div>
         
         {/* Accordion for Recommendations */}
-        <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
+        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm overflow-hidden">
              <button
                 onClick={() => toggleSection('recommendations')}
-                className="w-full flex justify-between items-center p-4 bg-slate-50 dark:bg-slate-700/50 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                className="w-full flex justify-between items-center p-5 bg-slate-50/50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors"
                 aria-expanded={openSection === 'recommendations'}
             >
-                <h3 className="text-lg font-semibold flex items-center text-slate-800 dark:text-slate-200">
-                    <SparkleIcon className="w-6 h-6 mr-2 text-indigo-500"/> Recomendações da IA ({result.recommendations.length})
-                </h3>
-                 <ChevronDownIcon className={`w-5 h-5 text-slate-500 dark:text-slate-400 transition-transform duration-300 ${openSection === 'recommendations' ? 'rotate-180' : ''}`} />
+                <div className="flex items-center gap-3">
+                     <div className="p-1.5 bg-indigo-100 text-indigo-600 rounded-lg dark:bg-indigo-900/30 dark:text-indigo-400">
+                        <SparkleIcon className="w-6 h-6"/> 
+                     </div>
+                     <div className="text-left">
+                        <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200">Recomendações da IA</h3>
+                        <p className="text-xs text-slate-500">{result.recommendations.length} sugestões de correção</p>
+                     </div>
+                </div>
+                 <ChevronDownIcon className={`w-5 h-5 text-slate-400 transition-transform duration-300 ${openSection === 'recommendations' ? 'rotate-180' : ''}`} />
             </button>
             {openSection === 'recommendations' && (
-                <div className="p-4 border-t border-slate-200 dark:border-slate-700 animate-fade-in-down">
+                <div className="p-6 border-t border-slate-200 dark:border-slate-700 animate-fade-in-down">
                     {result.recommendations.length > 0 ? (
-                        <ul className="space-y-3 list-disc list-inside text-slate-600 dark:text-slate-300">
-                        {result.recommendations.map((rec, index) => (
-                            <li key={index} className="pl-2 leading-relaxed">{rec}</li>
-                        ))}
-                        </ul>
-                    ) : (
-                        <div className="flex items-center p-4 text-sm text-green-800 rounded-lg bg-green-50 dark:bg-slate-700 dark:text-green-400">
-                            <CheckCircleIcon className="w-5 h-5 mr-2"/>
-                            Nenhuma recomendação necessária.
+                        <div className="bg-indigo-50 dark:bg-indigo-900/20 rounded-lg p-5">
+                            <ul className="space-y-4">
+                            {result.recommendations.map((rec, index) => (
+                                <li key={index} className="flex items-start gap-3 text-slate-700 dark:text-slate-300">
+                                    <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-500 flex-shrink-0"></span>
+                                    <span className="leading-relaxed">{rec}</span>
+                                </li>
+                            ))}
+                            </ul>
                         </div>
+                    ) : (
+                        <p className="text-center text-slate-500 py-4 italic">Nenhuma recomendação adicional necessária.</p>
                     )}
                 </div>
             )}
         </div>
       </div>
     </div>
-    {/* Company Details Modal */}
+    {/* ... (Company Details Modal and Share Modal remain unchanged) ... */}
     {selectedCompany && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 animate-fade-in" onClick={() => setSelectedCompany(null)}>
             <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
@@ -661,4 +892,18 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
                     <a href={mailtoHref} className="block w-full text-center px-4 py-2 font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-md transition-colors">
                         Compartilhar por E-mail
                     </a>
-                    <button onClick={handleCopyToClipboard} className="w-full
+                    <button onClick={handleCopyToClipboard} className="w-full px-4 py-2 font-medium text-slate-700 bg-slate-200 hover:bg-slate-300 dark:bg-slate-600 dark:text-slate-200 dark:hover:bg-slate-500 rounded-md transition-colors">
+                        {copyStatus}
+                    </button>
+                </div>
+                 <div className="p-4 border-t border-slate-200 dark:border-slate-700 text-right">
+                    <button onClick={() => setShowShareModal(false)} className="px-4 py-2 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-indigo-200 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600 rounded-md transition-colors">
+                        Fechar
+                    </button>
+                </div>
+            </div>
+        </div>
+    )}
+    </>
+  );
+};

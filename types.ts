@@ -7,6 +7,15 @@ export interface Anomaly {
   message: string;
   expected?: string;
   found?: string;
+  legalBasis?: string; // Campo novo para legislação
+}
+
+export interface AnalyzedNcm {
+  code: string;
+  descriptionInDocument?: string;
+  officialDescription?: string;
+  status: 'valid' | 'invalid' | 'unknown' | 'divergent';
+  analysis: string;
 }
 
 export interface AuditResult {
@@ -17,6 +26,7 @@ export interface AuditResult {
   riskScore: number;
   riskLevel: 'low' | 'medium' | 'high' | 'critical';
   summary: string;
+  analyzedNcms?: AnalyzedNcm[]; // Added field for detailed NCM analysis
   anomalies: Anomaly[];
   recommendations: string[];
 }

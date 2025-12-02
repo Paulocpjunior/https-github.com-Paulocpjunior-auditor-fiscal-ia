@@ -1,3 +1,4 @@
+
 export interface Anomaly {
   type: 'error' | 'warning' | 'info';
   severity: 'critical' | 'high' | 'medium' | 'low';
@@ -31,4 +32,15 @@ export interface ChatMessage {
 export interface GroundingSource {
   uri: string;
   title: string;
+}
+
+export type TaxRegime = 'Simples Nacional' | 'Lucro Presumido' | 'Lucro Real' | 'MEI' | 'Isento/Imune';
+
+export interface UserTaxRates {
+  icms?: number;
+  iss?: number;
+  pis?: number;
+  cofins?: number;
+  providerRegime?: TaxRegime;
+  takerRegime?: TaxRegime;
 }

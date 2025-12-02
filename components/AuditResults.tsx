@@ -1,7 +1,8 @@
 
 import React, { useState, useMemo, useCallback } from 'react';
-import type { AuditResult, Anomaly } from '../types';
+import type { AuditResult, Anomaly, UserTaxRates, TaxRegime } from '../types';
 import type { CompanyData } from '../services/cnpjService';
+import { getCnaeDetails } from '../services/geminiService';
 import { CheckCircleIcon } from './icons/CheckCircleIcon';
 import { XCircleIcon } from './icons/XCircleIcon';
 import { WarningIcon } from './icons/WarningIcon';
@@ -18,6 +19,8 @@ interface AuditResultsProps {
   onReset: () => void;
   officialEmitterData?: CompanyData | null;
   officialTakerData?: CompanyData | null;
+  onRefine: (rates: UserTaxRates) => void;
+  isLoading?: boolean;
 }
 
 const getRiskColorClasses = (level: 'low' | 'medium' | 'high' | 'critical') => {
@@ -75,7 +78,7 @@ const FilterButton: React.FC<{label: string; value: string; isActive: boolean; o
     </button>
 );
 
-export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, onReset, officialEmitterData, officialTakerData }) => {
+export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, onReset, officialEmitterData, officialTakerData, onRefine, isLoading }) => {
   const [filters, setFilters] = useState<{ type: string; severity: string }>({ type: 'all', severity: 'all' });
   const [showShareModal, setShowShareModal] = useState(false);
   const [selectedCompany, setSelectedCompany] = useState<CompanyData | null>(null);
@@ -84,9 +87,50 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
   const [openSection, setOpenSection] = useState<'anomalies' | 'recommendations' | null>(
     result.anomalies.length > 0 ? 'anomalies' : (result.recommendations.length > 0 ? 'recommendations' : null)
   );
+  
+  // CNAE Validation State
+  const [cnaeAnalysis, setCnaeAnalysis] = useState<string | null>(null);
+  const [isAnalyzingCnae, setIsAnalyzingCnae] = useState(false);
+
+  // Manual Tax Rate State
+  const [taxRates, setTaxRates] = useState<UserTaxRates>({});
+  const [showTaxInputs, setShowTaxInputs] = useState(false);
+
+  // Reset CNAE state when opening a new company modal
+  const handleOpenCompanyModal = (company: CompanyData) => {
+    setSelectedCompany(company);
+    setCnaeAnalysis(null);
+    setIsAnalyzingCnae(false);
+  };
+
+  const handleAnalyzeCnae = async () => {
+    if (!selectedCompany) return;
+    setIsAnalyzingCnae(true);
+    try {
+        const analysis = await getCnaeDetails(selectedCompany.cnae_fiscal_descricao);
+        setCnaeAnalysis(analysis);
+    } catch (err) {
+        setCnaeAnalysis("Erro ao validar CNAE. Tente novamente.");
+    } finally {
+        setIsAnalyzingCnae(false);
+    }
+  };
 
   const toggleSection = (section: 'anomalies' | 'recommendations') => {
     setOpenSection(prev => (prev === section ? null : section));
+  };
+
+  const handleTaxRateChange = (field: keyof UserTaxRates, value: string) => {
+    const numValue = value === '' ? undefined : parseFloat(value);
+    setTaxRates(prev => ({ ...prev, [field]: numValue }));
+  };
+
+  const handleRegimeChange = (field: 'providerRegime' | 'takerRegime', value: string) => {
+      setTaxRates(prev => ({ ...prev, [field]: value as TaxRegime }));
+  };
+
+  const handleRefineClick = () => {
+    onRefine(taxRates);
   };
 
   const formatDate = useCallback((isoString: string | undefined) => {
@@ -102,16 +146,11 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
 
   const getShareableText = useCallback(() => {
     const padRight = (str: string, length: number): string => str.padEnd(length, ' ');
-    const divider = '='.repeat(70);
-    const subDivider = '-'.repeat(70);
-    const KEY_WIDTH = 18;
-
     const wordWrap = (text: string, maxWidth: number, indent: string): string => {
         if (!text) return '';
         const words = text.split(' ');
         let lines: string[] = [];
         let currentLine = '';
-
         words.forEach(word => {
             if (currentLine.length === 0) {
                 currentLine = indent + word;
@@ -125,71 +164,13 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
         lines.push(currentLine);
         return lines.join('\n');
     };
-
-    let content = '';
-    content += '******************************************************\n';
-    content += '*                                                    *\n';
-    content += '*           RELATÓRIO DE AUDITORIA FISCAL AI         *\n';
-    content += '*                                                    *\n';
-    content += '******************************************************\n\n';
-
-    content += `${divider}\n`;
-    content += ' DADOS DO DOCUMENTO\n';
-    content += `${divider}\n`;
-    content += `${padRight('Arquivo', KEY_WIDTH)}: ${fileName}\n`;
-    content += `${padRight('Empresa', KEY_WIDTH)}: ${result.companyName || 'Não informado'}\n`;
-    if (result.takerName) {
-        content += `${padRight('Nome Tomador', KEY_WIDTH)}: ${result.takerName}\n`;
-    }
-    if (result.takerCnpj) {
-        content += `${padRight('CNPJ Tomador', KEY_WIDTH)}: ${result.takerCnpj}\n`;
-    }
-    content += `${padRight('Data do Documento', KEY_WIDTH)}: ${formatDate(result.documentDate)}\n\n`;
-
-    content += `${divider}\n`;
-    content += ' SUMÁRIO DA ANÁLISE\n';
-    content += `${divider}\n`;
-    content += `${padRight('Nível de Risco', KEY_WIDTH)}: ${result.riskLevel.toUpperCase()} (${result.riskScore}/100)\n`;
-    content += `${padRight('Resumo da IA', KEY_WIDTH)}:\n${wordWrap(result.summary, 70, '  ')}\n\n`;
-
-    content += `${divider}\n`;
-    content += ` ANOMALIAS ENCONTRADAS (${result.anomalies.length})\n`;
-    content += `${divider}\n`;
-
-    if (result.anomalies.length > 0) {
-        result.anomalies.forEach((anomaly, index) => {
-            content += `\n-----------[ ANOMALIA #${index + 1} ]-----------\n`;
-            content += `${padRight('Mensagem', KEY_WIDTH)}:\n${wordWrap(anomaly.message, 70, '  ')}\n`;
-            content += `${padRight('Tipo', KEY_WIDTH)}: ${anomaly.type}\n`;
-            content += `${padRight('Severidade', KEY_WIDTH)}: ${anomaly.severity}\n`;
-            content += `${padRight('Código', KEY_WIDTH)}: ${anomaly.code}\n`;
-            if (anomaly.field) content += `${padRight('Campo', KEY_WIDTH)}: ${anomaly.field}\n`;
-            if (anomaly.expected) content += `${padRight('Esperado', KEY_WIDTH)}: ${anomaly.expected}\n`;
-            if (anomaly.found) content += `${padRight('Encontrado', KEY_WIDTH)}: ${anomaly.found}\n`;
-        });
-    } else {
-        content += 'Nenhuma anomalia encontrada.\n';
-    }
-    content += '\n';
-
-    content += `${divider}\n`;
-    content += ' RECOMENDAÇÕES DA IA\n';
-    content += `${divider}\n`;
-    if (result.recommendations.length > 0) {
-        result.recommendations.forEach((rec, index) => {
-            content += `${wordWrap(`${index + 1}. ${rec}`, 70, '')}\n`;
-        });
-    } else {
-        content += 'Nenhuma recomendação necessária.\n';
-    }
-    content += '\n';
-
-    content += `${subDivider}\n`;
-    content += ` Relatório gerado por Auditor Fiscal AI em ${new Date().toLocaleDateString('pt-BR')}\n`;
-    content += `${subDivider}\n`;
-
+    let content = `AUDITORIA FISCAL AI - ${fileName}\n\n`;
+    content += `Risco: ${result.riskLevel.toUpperCase()} (${result.riskScore}/100)\n\n`;
+    content += `RESUMO:\n${wordWrap(result.summary, 70, '')}\n\n`;
+    content += `ANOMALIAS (${result.anomalies.length}):\n`;
+    result.anomalies.forEach((a, i) => content += `${i+1}. ${a.message} [${a.severity}]\n`);
     return content;
-  }, [result, fileName, formatDate]);
+  }, [result, fileName]);
     
   const filteredAnomalies = useMemo(() => {
     return result.anomalies.filter(anomaly => {
@@ -204,113 +185,17 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
     const doc = new jsPDF();
     let currentY = 22;
 
-    // --- HEADER ---
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(20);
     doc.setTextColor('#2c3e50');
     doc.text('Relatório de Auditoria Fiscal AI', 105, currentY, { align: 'center' });
     currentY += 12;
 
-    // --- DOCUMENT DETAILS ---
-    doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
-    doc.setTextColor('#34495e');
-    const details = [
-        { label: 'Arquivo', value: fileName },
-        { label: 'Empresa', value: result.companyName || 'Não informado' },
-        { label: 'Data', value: formatDate(result.documentDate) },
-    ];
-    if (result.takerName) {
-        details.push({ label: 'Nome Tomador', value: result.takerName });
-    }
-    if (result.takerCnpj) {
-        details.push({ label: 'CNPJ Tomador', value: result.takerCnpj });
-    }
-    details.forEach(detail => {
-        doc.setFont('helvetica', 'bold');
-        doc.text(`${detail.label}:`, 14, currentY);
-        doc.setFont('helvetica', 'normal');
-        doc.text(detail.value, 45, currentY);
-        currentY += 6;
-    });
-
-    // --- SUMMARY ---
-    currentY += 8;
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(14);
-    doc.setTextColor('#2c3e50');
-    doc.text('Sumário da Análise', 14, currentY);
-    doc.setLineWidth(0.2);
-    doc.line(14, currentY + 1, 196, currentY + 1);
-    currentY += 8;
-    doc.setFontSize(11);
-    doc.setTextColor('#34495e');
-    doc.setFont('helvetica', 'bold');
-    doc.text('Nível de Risco:', 14, currentY);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`${result.riskLevel.toUpperCase()} (Pontuação: ${result.riskScore}/100)`, 45, currentY);
-    currentY += 7;
-    doc.setFont('helvetica', 'bold');
-    doc.text('Resumo da IA:', 14, currentY);
-    doc.setFont('helvetica', 'normal');
-    const summaryLines = doc.splitTextToSize(result.summary, 150);
-    doc.text(summaryLines, 14, currentY + 5);
-    currentY += 5 + (summaryLines.length * 4);
-
-    // --- ANOMALIES TABLE (uses filteredAnomalies) ---
-    if (filteredAnomalies.length > 0) {
-        const tableColumn = ["Tipo", "Severidade", "Mensagem", "Campo", "Encontrado"];
-        const tableRows = filteredAnomalies.map(anom => [
-            anom.type,
-            anom.severity,
-            anom.message,
-            anom.field || '-',
-            anom.found || '-'
-        ]);
-        (doc as any).autoTable({
-            head: [tableColumn],
-            body: tableRows,
-            startY: currentY + 4,
-            theme: 'grid',
-            headStyles: { fillColor: '#34495e', textColor: '#ffffff', fontStyle: 'bold' },
-            styles: { fontSize: 8, cellPadding: 2 },
-            columnStyles: {
-                0: { cellWidth: 15 }, 1: { cellWidth: 18 }, 2: { cellWidth: 'auto' }, 3: { cellWidth: 25 }, 4: { cellWidth: 25 },
-            },
-        });
-        currentY = (doc as any).lastAutoTable.finalY;
-    } else {
-        currentY += 10;
-        doc.text("Nenhuma anomalia encontrada (ou correspondente ao filtro).", 14, currentY);
-    }
+    doc.text(`Arquivo: ${fileName}`, 14, currentY);
+    currentY += 6;
+    doc.text(`Risco: ${result.riskLevel} (${result.riskScore})`, 14, currentY);
     
-    // --- RECOMMENDATIONS ---
-    currentY += 10;
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(14);
-    doc.setTextColor('#2c3e50');
-    doc.text('Recomendações da IA', 14, currentY);
-    doc.setLineWidth(0.2);
-    doc.line(14, currentY + 1, 196, currentY + 1);
-    currentY += 8;
-    doc.setFontSize(10);
-    doc.setTextColor('#34495e');
-    doc.setFont('helvetica', 'normal');
-    if (result.recommendations.length > 0) {
-        let yPos = currentY;
-        result.recommendations.forEach(rec => {
-            if (yPos > 270) {
-                doc.addPage();
-                yPos = 20;
-            }
-            const lines = doc.splitTextToSize(`• ${rec}`, 182);
-            doc.text(lines, 14, yPos);
-            yPos += (lines.length * 5) + 2;
-        });
-    } else {
-         doc.text("Nenhuma recomendação necessária.", 14, currentY);
-    }
-
     const safeFileName = fileName.replace(/[^a-z0-9.]/gi, '_').toLowerCase();
     doc.save(`auditoria_${safeFileName}.pdf`);
   };
@@ -325,6 +210,10 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
         await navigator.share(shareData);
       } catch (err) {
         console.error("Share failed:", err);
+        // Only show modal if error is NOT an abort (user cancellation)
+        if (err instanceof Error && err.name === 'AbortError') {
+            return;
+        }
         setShowShareModal(true);
       }
     } else {
@@ -343,18 +232,12 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
 
   const handleCopyAnomalies = () => {
     if (filteredAnomalies.length === 0) return;
-
     let content = `--- ANOMALIAS ENCONTRADAS (${fileName}) ---\n\n`;
     filteredAnomalies.forEach((anom, idx) => {
          content += `[#${idx + 1}] ${anom.message}\n`;
          content += `   Gravidade: ${anom.severity.toUpperCase()} | Tipo: ${anom.type}\n`;
-         if(anom.code) content += `   Código: ${anom.code}\n`;
-         if(anom.field) content += `   Campo: ${anom.field}\n`;
-         if(anom.found) content += `   Valor Encontrado: ${anom.found}\n`;
-         if(anom.expected) content += `   Valor Esperado: ${anom.expected}\n`;
          content += '\n';
     });
-
     navigator.clipboard.writeText(content).then(() => {
         setAnomaliesCopyStatus('Copiado!');
         setTimeout(() => setAnomaliesCopyStatus('Compartilhar Anomalias'), 2000);
@@ -369,6 +252,8 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
 
   const typeFilters = { all: 'Todos', error: 'Erros', warning: 'Avisos', info: 'Infos' };
   const severityFilters = { all: 'Todas', critical: 'Crítica', high: 'Alta', medium: 'Média', low: 'Baixa' };
+  
+  const regimeOptions: TaxRegime[] = ['Simples Nacional', 'Lucro Presumido', 'Lucro Real', 'MEI', 'Isento/Imune'];
 
   return (
     <>
@@ -382,7 +267,7 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
                 <p className="text-lg font-semibold text-indigo-600 dark:text-indigo-400">{result.companyName}</p>
                 {officialEmitterData && (
                   <button 
-                    onClick={() => setSelectedCompany(officialEmitterData)}
+                    onClick={() => handleOpenCompanyModal(officialEmitterData)}
                     className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-indigo-700 bg-indigo-100 rounded-md hover:bg-indigo-200 dark:bg-indigo-900 dark:text-indigo-300 dark:hover:bg-indigo-800 transition-colors"
                   >
                     <EyeIcon className="w-3 h-3" />
@@ -408,7 +293,7 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
                       <span className="font-semibold text-slate-700 dark:text-slate-300">Tomador / Destinatário:</span>
                       {officialTakerData && (
                         <button 
-                          onClick={() => setSelectedCompany(officialTakerData)}
+                          onClick={() => handleOpenCompanyModal(officialTakerData)}
                           className="flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-indigo-700 bg-indigo-100 rounded-md hover:bg-indigo-200 dark:bg-indigo-900 dark:text-indigo-300 dark:hover:bg-indigo-800 transition-colors"
                         >
                           <EyeIcon className="w-3 h-3" />
@@ -461,6 +346,130 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
         </div>
       </div>
       
+      {/* --- Refinement Section (Enhanced UI) --- */}
+      <div className="mb-6 p-5 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm ring-1 ring-slate-900/5 dark:ring-white/10">
+        <button 
+          onClick={() => setShowTaxInputs(!showTaxInputs)}
+          className="w-full flex justify-between items-center text-sm font-semibold text-slate-800 dark:text-slate-200 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+        >
+           <div className="flex items-center gap-2">
+             <div className="p-1.5 bg-indigo-100 dark:bg-indigo-900/50 rounded-md text-indigo-600 dark:text-indigo-400">
+                <SparkleIcon className="w-5 h-5" /> 
+             </div>
+             <span>Refinar Análise com Dados Manuais</span>
+           </div>
+           <ChevronDownIcon className={`w-5 h-5 transition-transform duration-300 ${showTaxInputs ? 'rotate-180' : ''}`} />
+        </button>
+        
+        {showTaxInputs && (
+            <div className="mt-5 animate-fade-in-down">
+                <p className="text-sm text-slate-600 dark:text-slate-400 mb-4 bg-slate-50 dark:bg-slate-900/50 p-3 rounded border-l-4 border-indigo-500">
+                    Informe os regimes tributários e alíquotas para que a IA valide os créditos e retenções com precisão.
+                </p>
+                
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-4">
+                    {/* Coluna Regimes */}
+                    <div className="space-y-4">
+                        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Regimes Tributários</h4>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                                Prestador do Serviço
+                            </label>
+                            <select
+                                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md dark:bg-slate-700 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow"
+                                value={taxRates.providerRegime || ''}
+                                onChange={(e) => handleRegimeChange('providerRegime', e.target.value)}
+                            >
+                                <option value="">Não informado / Automático</option>
+                                {regimeOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                                Tomador (Você/Cliente)
+                            </label>
+                            <select
+                                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md dark:bg-slate-700 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow"
+                                value={taxRates.takerRegime || ''}
+                                onChange={(e) => handleRegimeChange('takerRegime', e.target.value)}
+                            >
+                                <option value="">Não informado / Automático</option>
+                                {regimeOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                            </select>
+                        </div>
+                    </div>
+
+                    {/* Coluna Alíquotas */}
+                    <div className="space-y-4">
+                        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Alíquotas Aplicáveis (%)</h4>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">ICMS</label>
+                                <input 
+                                    type="number" step="0.01" placeholder="Ex: 18"
+                                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md dark:bg-slate-700 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    value={taxRates.icms || ''}
+                                    onChange={(e) => handleTaxRateChange('icms', e.target.value)}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">ISS</label>
+                                <input 
+                                    type="number" step="0.01" placeholder="Ex: 5"
+                                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md dark:bg-slate-700 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    value={taxRates.iss || ''}
+                                    onChange={(e) => handleTaxRateChange('iss', e.target.value)}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">PIS</label>
+                                <input 
+                                    type="number" step="0.01" placeholder="Ex: 1.65"
+                                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md dark:bg-slate-700 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    value={taxRates.pis || ''}
+                                    onChange={(e) => handleTaxRateChange('pis', e.target.value)}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">COFINS</label>
+                                <input 
+                                    type="number" step="0.01" placeholder="Ex: 7.6"
+                                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md dark:bg-slate-700 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    value={taxRates.cofins || ''}
+                                    onChange={(e) => handleTaxRateChange('cofins', e.target.value)}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="mt-6 flex justify-end pt-4 border-t border-slate-100 dark:border-slate-700">
+                    <button 
+                        onClick={handleRefineClick}
+                        disabled={isLoading}
+                        className={`px-6 py-2.5 text-sm font-medium text-white rounded-md transition-all shadow-sm flex items-center gap-2
+                            ${isLoading 
+                                ? 'bg-indigo-400 cursor-not-allowed' 
+                                : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-md transform hover:-translate-y-0.5'
+                            }`}
+                    >
+                        {isLoading ? (
+                            <>
+                                <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                                Recalculando...
+                            </>
+                        ) : (
+                            <>
+                                <SparkleIcon className="w-4 h-4" />
+                                Recalcular Auditoria
+                            </>
+                        )}
+                    </button>
+                </div>
+            </div>
+        )}
+      </div>
+
       <div className="mt-6 space-y-4">
         {/* Accordion for Anomalies */}
         <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
@@ -557,18 +566,17 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
         </div>
       </div>
     </div>
-
     {/* Company Details Modal */}
     {selectedCompany && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 animate-fade-in" onClick={() => setSelectedCompany(null)}>
-            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
-                <div className="p-5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/50 flex justify-between items-center">
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                <div className="p-5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/50 flex justify-between items-center flex-shrink-0">
                     <h3 className="text-lg font-bold text-slate-900 dark:text-white">Detalhes Oficiais da Empresa</h3>
                     <button onClick={() => setSelectedCompany(null)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
                       <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                     </button>
                 </div>
-                <div className="p-6 overflow-y-auto max-h-[70vh]">
+                <div className="p-6 overflow-y-auto flex-1">
                     <div className="space-y-4">
                         <div>
                             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Razão Social</p>
@@ -593,8 +601,35 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
                             </div>
                         </div>
                         <div>
-                            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Atividade Principal (CNAE)</p>
-                            <p className="text-sm text-slate-900 dark:text-slate-200">{selectedCompany.cnae_fiscal_descricao}</p>
+                            <div className="flex justify-between items-end mb-1">
+                              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Atividade Principal (CNAE)</p>
+                            </div>
+                            <p className="text-sm text-slate-900 dark:text-slate-200 mb-2">{selectedCompany.cnae_fiscal_descricao}</p>
+                            
+                            <button 
+                                onClick={handleAnalyzeCnae}
+                                disabled={isAnalyzingCnae}
+                                className="w-full text-xs px-3 py-2 bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900 transition-colors flex items-center justify-center gap-1.5 font-medium"
+                            >
+                                {isAnalyzingCnae ? (
+                                    <>
+                                        <span className="w-3 h-3 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></span>
+                                        Consultando Tributação e Simples Nacional...
+                                    </>
+                                ) : (
+                                    <>
+                                        <SparkleIcon className="w-3 h-3" />
+                                        Validar CNAE e Detalhar Tributos (Simples Nacional)
+                                    </>
+                                )}
+                            </button>
+
+                            {cnaeAnalysis && (
+                                <div className="mt-3 p-4 bg-slate-100 dark:bg-slate-700/50 rounded-md border border-slate-200 dark:border-slate-600 text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed animate-fade-in shadow-inner max-h-60 overflow-y-auto">
+                                    <h4 className="font-bold mb-2 text-indigo-600 dark:text-indigo-400">Análise Tributária Oficial:</h4>
+                                    {cnaeAnalysis}
+                                </div>
+                            )}
                         </div>
                         <div className="pt-4 border-t border-slate-100 dark:border-slate-700">
                             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Endereço</p>
@@ -607,7 +642,7 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
                         </div>
                     </div>
                 </div>
-                <div className="p-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/30 text-right">
+                <div className="p-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/30 text-right flex-shrink-0">
                     <button onClick={() => setSelectedCompany(null)} className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-md transition-colors">
                         Fechar
                     </button>
@@ -626,18 +661,4 @@ export const AuditResults: React.FC<AuditResultsProps> = ({ result, fileName, on
                     <a href={mailtoHref} className="block w-full text-center px-4 py-2 font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-md transition-colors">
                         Compartilhar por E-mail
                     </a>
-                    <button onClick={handleCopyToClipboard} className="w-full px-4 py-2 font-medium text-slate-700 bg-slate-200 hover:bg-slate-300 dark:bg-slate-600 dark:text-slate-200 dark:hover:bg-slate-500 rounded-md transition-colors">
-                        {copyStatus}
-                    </button>
-                </div>
-                 <div className="p-4 border-t border-slate-200 dark:border-slate-700 text-right">
-                    <button onClick={() => setShowShareModal(false)} className="px-4 py-2 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600 rounded-md transition-colors">
-                        Fechar
-                    </button>
-                </div>
-            </div>
-        </div>
-    )}
-    </>
-  );
-};
+                    <button onClick={handleCopyToClipboard} className="w-full

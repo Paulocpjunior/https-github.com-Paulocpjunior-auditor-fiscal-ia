@@ -16,7 +16,8 @@ declare const pdfjsLib: any;
 
 const App: React.FC = () => {
   const [auditResult, setAuditResult] = useState<AuditResult | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  // Replaced simple boolean with a status string for detailed feedback
+  const [loadingStatus, setLoadingStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [currentFile, setCurrentFile] = useState<File | null>(null);
   
@@ -28,13 +29,15 @@ const App: React.FC = () => {
   const [officialEmitterData, setOfficialEmitterData] = useState<CompanyData | null>(null);
   const [officialTakerData, setOfficialTakerData] = useState<CompanyData | null>(null);
 
+  const isLoading = !!loadingStatus;
+
   const handleFileAudit = useCallback(async (files: File[]) => {
     if (files.length === 0) return;
 
     // Currently processing the first file. Future implementations can handle queues.
     const file = files[0];
     
-    setIsLoading(true);
+    setLoadingStatus('Validando integridade e formato do arquivo...');
     setError(null);
     setAuditResult(null);
     setOfficialEmitterData(null);
@@ -47,11 +50,12 @@ const App: React.FC = () => {
 
     if (!isValid) {
       setError(validationError || 'O arquivo enviado é inválido ou não é suportado.');
-      setIsLoading(false);
+      setLoadingStatus(null);
       return;
     }
 
     try {
+      setLoadingStatus('Processando documento e extraindo dados (OCR)...');
       let fileContent = '';
       let fileImages: string[] = []; // Array to hold Base64 images for scanned PDFs
       const fileType = file.type;
@@ -94,6 +98,7 @@ const App: React.FC = () => {
           // If extracted text is very short/empty, assume it's a scanned PDF (image).
           if (fileContent.trim().length < 50) {
               console.log("PDF text content is minimal/empty. Rendering pages as images for AI Vision...");
+              setLoadingStatus('Aplicando Visão Computacional em documento digitalizado...');
               const numPagesToRender = Math.min(pdf.numPages, 3); // Limit to first 3 pages for performance
               
               for (let i = 1; i <= numPagesToRender; i++) {
@@ -132,10 +137,9 @@ const App: React.FC = () => {
       let takerName: string | null = null;
       let municipality: string | null = null;
 
+      setLoadingStatus('Identificando participantes (Emitente/Tomador)...');
+
       // --- EXTRACTION STRATEGY ---
-      // Attempts to extract metadata only if text content is available. 
-      // If it's an image-only PDF, we skip this and let Gemini do the OCR extraction.
-      
       if (fileContent && fileContent.trim().length > 0 && file.name.toLowerCase().endsWith('.xml')) {
         try {
           const parser = new DOMParser();
@@ -225,14 +229,20 @@ const App: React.FC = () => {
       let fetchedEmitterData: CompanyData | null = null;
       let fetchedTakerData: CompanyData | null = null;
 
-      if (emitterCnpj) {
-        fetchedEmitterData = await fetchCompanyData(emitterCnpj.replace(/\D/g, ''));
-        setOfficialEmitterData(fetchedEmitterData);
+      if (emitterCnpj || takerCnpj) {
+        setLoadingStatus('Consultando bases oficiais (Receita Federal)...');
+        
+        if (emitterCnpj) {
+            fetchedEmitterData = await fetchCompanyData(emitterCnpj.replace(/\D/g, ''));
+            setOfficialEmitterData(fetchedEmitterData);
+        }
+        if (takerCnpj && takerCnpj.replace(/\D/g, '').length === 14) {
+            fetchedTakerData = await fetchCompanyData(takerCnpj.replace(/\D/g, ''));
+            setOfficialTakerData(fetchedTakerData);
+        }
       }
-      if (takerCnpj && takerCnpj.replace(/\D/g, '').length === 14) {
-        fetchedTakerData = await fetchCompanyData(takerCnpj.replace(/\D/g, ''));
-        setOfficialTakerData(fetchedTakerData);
-      }
+
+      setLoadingStatus('Inteligência Artificial analisando conformidade tributária...');
 
       const result = await analyzeDocument(
           fileContent, 
@@ -254,32 +264,14 @@ const App: React.FC = () => {
       const errorMessage = err instanceof Error ? err.message : "An unknown error occurred during the audit.";
       setError(`Falha na auditoria do documento. ${errorMessage}`);
     } finally {
-      setIsLoading(false);
+      setLoadingStatus(null);
     }
   }, []);
 
   const handleRefineAudit = useCallback(async (userRates: UserTaxRates) => {
     if (!currentFile || (!currentFileContent && currentFileImages.length === 0)) return;
 
-    setIsLoading(true);
-    // Note: We do NOT clear auditResult here to allow visual persistence while loading, or we handle it in AuditResults
-    // But typically to show a full loading screen we might clear it. 
-    // Given the request for better visual feedback, keeping the old result until new one is ready
-    // and showing a spinner on the button is a common pattern.
-    // However, the current structure renders 'loading' view if isLoading is true. 
-    // Let's rely on isLoading passed to AuditResults to show spinner there if we want inline, 
-    // OR allow the full screen loader. 
-    // Since App logic unmounts AuditResults if isLoading is true (see return below), 
-    // we must actually NOT unmount it if we want inline feedback.
-    // BUT changing that logic is risky for the main flow. 
-    // Let's stick to the full screen loader for now as it's consistent, but I will pass isLoading just in case
-    // we change the render condition later or if AuditResults persists.
-    
-    // Actually, to support the user request "Improve visual feedback", keeping the form visible while processing is better.
-    // But right now: {!auditResult && !isLoading} shows upload. {isLoading} shows loader. {auditResult && !isLoading} shows result.
-    // So if I set isLoading=true, the result disappears and the big loader appears. This IS good feedback.
-    // I will keep it as is.
-    
+    setLoadingStatus('Refinando análise com novos parâmetros tributários...');
     setAuditResult(null); 
 
     try {
@@ -293,7 +285,7 @@ const App: React.FC = () => {
             auditResult?.takerName,
             officialEmitterData,
             officialTakerData,
-            null, // Municipality reuse complex, let AI find it again or null
+            null, 
             userRates // Pass user manual rates
         );
         setAuditResult(result);
@@ -301,7 +293,7 @@ const App: React.FC = () => {
         console.error("Refinement Error:", err);
         setError("Erro ao refinar a análise. Tente novamente.");
     } finally {
-        setIsLoading(false);
+        setLoadingStatus(null);
     }
   }, [currentFile, currentFileContent, currentFileImages, auditResult, officialEmitterData, officialTakerData]);
   
@@ -313,7 +305,7 @@ const App: React.FC = () => {
     setCurrentFileImages([]);
     setOfficialEmitterData(null);
     setOfficialTakerData(null);
-    setIsLoading(false);
+    setLoadingStatus(null);
   };
 
   return (
@@ -334,20 +326,46 @@ const App: React.FC = () => {
           {!auditResult && !isLoading && <FileUpload onFileSelect={handleFileAudit} disabled={isLoading} />}
           
           {isLoading && (
-            <div className="flex flex-col items-center justify-center p-8 bg-white dark:bg-slate-800 rounded-lg shadow-md border border-slate-200 dark:border-slate-700">
-              <SparkleIcon className="w-12 h-12 text-indigo-500 animate-pulse" />
-              <p className="mt-4 text-lg font-semibold text-slate-700 dark:text-slate-300">Analisando documento...</p>
-              <p className="text-slate-500 dark:text-slate-400">{currentFile?.name}</p>
-              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400 animate-pulse">
-                 {currentFile?.type.includes('pdf') ? 'Extraindo dados e processando imagens...' : 'Validando estrutura, NCM e consultando bases oficiais...'}
+            <div className="flex flex-col items-center justify-center p-8 bg-white dark:bg-slate-800 rounded-lg shadow-md border border-slate-200 dark:border-slate-700 animate-fade-in-down">
+              <div className="relative">
+                 <SparkleIcon className="w-16 h-16 text-indigo-500 animate-bounce" />
+                 <span className="absolute top-0 right-0 flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-500"></span>
+                 </span>
+              </div>
+              
+              <h3 className="mt-6 text-xl font-semibold text-slate-800 dark:text-white">Análise em Andamento</h3>
+              <p className="text-indigo-600 dark:text-indigo-400 font-medium mt-1">{loadingStatus}</p>
+              
+              <div className="w-full max-w-md mt-4 bg-slate-200 dark:bg-slate-700 rounded-full h-2.5 overflow-hidden">
+                <div className="bg-indigo-600 h-2.5 rounded-full animate-progress" style={{ width: '100%' }}></div>
+              </div>
+              
+              <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">
+                 Documento: <span className="font-mono text-slate-700 dark:text-slate-300">{currentFile?.name}</span>
               </p>
+              <style>{`
+                @keyframes progress {
+                  0% { width: 0%; margin-left: 0; }
+                  50% { width: 50%; }
+                  100% { width: 100%; }
+                }
+                .animate-progress {
+                  animation: progress 2s ease-in-out infinite;
+                }
+              `}</style>
             </div>
           )}
 
           {error && (
-            <div className="p-4 my-4 text-sm text-red-800 rounded-lg bg-red-100 dark:bg-red-900 dark:text-red-300" role="alert">
-              <span className="font-medium">Erro!</span> {error}
-              <button onClick={handleReset} className="ml-4 font-bold underline">Tente novamente</button>
+            <div className="p-4 my-4 text-sm text-red-800 rounded-lg bg-red-100 dark:bg-red-900 dark:text-red-300 border border-red-200 dark:border-red-800 shadow-sm" role="alert">
+              <div className="flex items-center gap-2">
+                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                 <span className="font-bold">Falha na Análise:</span>
+              </div>
+              <p className="mt-1 ml-7">{error}</p>
+              <button onClick={handleReset} className="ml-7 mt-2 text-xs font-bold underline hover:text-red-900 dark:hover:text-white transition-colors">Tentar outro arquivo</button>
             </div>
           )}
 

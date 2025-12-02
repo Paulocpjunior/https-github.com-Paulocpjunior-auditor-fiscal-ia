@@ -190,14 +190,22 @@ export async function analyzeDocument(
     3.  **CRÍTICO: Validação Cadastral**: Se foram fornecidos "DADOS OFICIAIS" acima, compare-os com os dados dentro do documento. 
         - Se a Razão Social do documento for muito diferente da oficial, gere um alerta (Warning).
         - Se a Situação Cadastral oficial não for "ATIVA", gere um erro (Error) grave.
-    4.  **VALIDAÇÃO NCM**: Utilize a seção "CONSULTA API EXTERNA (NCM)" acima.
-        - Para cada item, verifique se o NCM usado existe na base oficial. Se constar como "NÃO ENCONTRADO", gere uma anomalia (Error).
-        - Compare a descrição do item no documento com a "Descrição Oficial". Se forem totalmente discrepantes (ex: NCM de "Parafuso" usado para "Serviço de Consultoria" ou "Leite"), gere uma anomalia (Warning ou Error dependendo da gravidade).
+    4.  **VALIDAÇÃO NCM (RIGOROSA)**: Utilize a seção "CONSULTA API EXTERNA (NCM)" acima.
+        - **Estrutura**: Todo NCM deve ter EXATAMENTE 8 dígitos numéricos. Se encontrar códigos como "99", "1234", ou "00000000", gere um ERRO (Critical) de estrutura imediatamente.
+        - **Capítulo**: Os dois primeiros dígitos devem ser entre 01 e 97 (Capítulos válidos da TIPI).
+        - **Correspondência**: Compare a descrição do item no documento com a "Descrição Oficial". Se forem totalmente discrepantes (ex: NCM de "Parafuso" usado para "Serviço de Consultoria" ou "Leite"), gere uma anomalia.
         - Preencha o campo 'analyzedNcms' no JSON com essa análise detalhada.
     5.  Valide todos os cálculos de impostos (ICMS, IPI, PIS, COFINS, ISS). **Se o usuário informou alíquotas manuais, utilize-as para validar o valor calculado.**
     6.  Regra do STF: O ICMS deve ser EXCLUÍDO da base de cálculo do PIS/COFINS.
     7.  Identifique retenções na fonte necessárias (IRRF, CSLL, INSS).
-    8.  **VALIDAÇÃO MUNICIPAL**: Se for NFSe, identifique o município no conteúdo. Se for **Taboão da Serra** (ou similar), verifique layout e alíquotas de ISS.
+    8.  **VALIDAÇÃO ISS (TRÍADE: CÓDIGO, MUNICÍPIO, ALÍQUOTA)**:
+        - **Identificação**: Extraia o (1) Código do Serviço (Item da LC 116/03 ou Código Municipal), (2) o Município de Incidência e (3) a Alíquota.
+        - **Cálculo Cruzado**: O valor do ISS destacado DEVE ser matematicamente exato: (Base de Cálculo * Alíquota / 100).
+        - **Regras de Local (SÃO PAULO vs OUTROS)**:
+             - **São Paulo (Capital)**: Se o Tomador é de SP e o Prestador de fora: Verifique se há menção ao cadastro CPOM. Sem cadastro, o ISS deve ser RETIDO pelo Tomador.
+             - **Local da Prestação**: Se o serviço for presencial (Ex: 7.02 - Obras, 7.10 - Limpeza), o ISS é devido ao município do local da obra, independente de onde estão sediadas as empresas.
+             - **Códigos**: Para SP, verifique se o código de serviço segue a tabela municipal (geralmente 5 dígitos, ex: 0xxxx).
+        - **Alíquota Mínima**: Verifique se a alíquota é inferior a 2% (ilegal pela LC 116, exceto exportação/obras específicas).
     9.  **ANÁLISE DE REGIME E CRÉDITOS (ALTA PRIORIDADE)**:
         - Utilize os regimes tributários informados manualmente (se houver) para validar a operação.
         - **Prestador SIMPLES NACIONAL**: Não deve destacar IPI (exceto Anexo Industria com permissão específica) e deve ter frases de permissão de crédito de ICMS apenas se aplicável. Valide se a alíquota de ISS corresponde a faixa do Simples.

@@ -10,34 +10,83 @@ import { validateFile } from './services/fileValidator';
 import { fetchCompanyData, type CompanyData } from './services/cnpjService';
 import type { AuditResult, UserTaxRates } from './types';
 import { SparkleIcon } from './components/icons/SparkleIcon';
+import { CheckCircleIcon } from './components/icons/CheckCircleIcon';
 
 // PDF.js is loaded in index.html, so it's available globally on window
 declare const pdfjsLib: any;
 
+const steps = [
+    { id: 1, label: 'Validação Estrutural' },
+    { id: 2, label: 'Extração de Texto e Imagens (HQ)' },
+    { id: 3, label: 'Consultas Externas (CNPJ/NCM)' },
+    { id: 4, label: 'Análise Tributária (IA)' }
+];
+
+const LoadingStepper: React.FC<{ currentStep: number }> = ({ currentStep }) => {
+    return (
+        <div className="w-full max-w-md mx-auto my-8">
+            {steps.map((step, index) => {
+                const isCompleted = currentStep > step.id;
+                const isActive = currentStep === step.id;
+                
+                return (
+                    <div key={step.id} className="flex items-center mb-4 last:mb-0 animate-fade-in-down" style={{ animationDelay: `${index * 100}ms` }}>
+                        <div className={`
+                            w-8 h-8 rounded-full flex items-center justify-center mr-4 border-2 flex-shrink-0
+                            ${isCompleted ? 'bg-green-500 border-green-500 text-white' : 
+                              isActive ? 'border-indigo-600 text-indigo-600 animate-pulse' : 
+                              'border-slate-300 text-slate-300'}
+                        `}>
+                            {isCompleted ? <CheckCircleIcon className="w-5 h-5" /> : <span>{step.id}</span>}
+                        </div>
+                        <div className="flex-1">
+                            <p className={`font-medium ${isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-600 dark:text-slate-400'}`}>
+                                {step.label}
+                            </p>
+                            {isActive && (
+                                <div className="h-1 w-full bg-slate-200 rounded mt-2 overflow-hidden">
+                                    <div className="h-full bg-indigo-600 animate-progress" style={{width: '100%'}}></div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            })}
+             <style>{`
+                @keyframes progress {
+                  0% { width: 0%; margin-left: 0; }
+                  50% { width: 50%; }
+                  100% { width: 100%; }
+                }
+                .animate-progress {
+                  animation: progress 2s ease-in-out infinite;
+                }
+              `}</style>
+        </div>
+    );
+};
+
 const App: React.FC = () => {
   const [auditResult, setAuditResult] = useState<AuditResult | null>(null);
-  // Replaced simple boolean with a status string for detailed feedback
-  const [loadingStatus, setLoadingStatus] = useState<string | null>(null);
+  const [loadingStep, setLoadingStep] = useState<number>(0); // 0 = Idle
   const [error, setError] = useState<string | null>(null);
   const [currentFile, setCurrentFile] = useState<File | null>(null);
   
-  // State to hold content for refinement
   const [currentFileContent, setCurrentFileContent] = useState<string>('');
   const [currentFileImages, setCurrentFileImages] = useState<string[]>([]);
+  const [validationWarnings, setValidationWarnings] = useState<string[]>([]);
 
-  // State to hold official data fetched from API
   const [officialEmitterData, setOfficialEmitterData] = useState<CompanyData | null>(null);
   const [officialTakerData, setOfficialTakerData] = useState<CompanyData | null>(null);
 
-  const isLoading = !!loadingStatus;
+  const isLoading = loadingStep > 0;
 
   const handleFileAudit = useCallback(async (files: File[]) => {
     if (files.length === 0) return;
 
-    // Currently processing the first file. Future implementations can handle queues.
     const file = files[0];
     
-    setLoadingStatus('Validando integridade e formato do arquivo...');
+    setLoadingStep(1); // Start Validation
     setError(null);
     setAuditResult(null);
     setOfficialEmitterData(null);
@@ -45,19 +94,25 @@ const App: React.FC = () => {
     setCurrentFile(file);
     setCurrentFileContent('');
     setCurrentFileImages([]);
+    setValidationWarnings([]);
 
-    const { isValid, error: validationError } = await validateFile(file);
+    // --- STEP 1: VALIDATION ---
+    const { isValid, error: validationError, warnings } = await validateFile(file);
 
     if (!isValid) {
       setError(validationError || 'O arquivo enviado é inválido ou não é suportado.');
-      setLoadingStatus(null);
+      setLoadingStep(0);
       return;
     }
+    setValidationWarnings(warnings || []);
 
     try {
-      setLoadingStatus('Processando documento e extraindo dados (OCR)...');
+      // --- STEP 2: OCR & IMAGING ---
+      setLoadingStep(2);
+      await new Promise(r => setTimeout(r, 200)); 
+
       let fileContent = '';
-      let fileImages: string[] = []; // Array to hold Base64 images for scanned PDFs
+      let fileImages: string[] = []; 
       const fileType = file.type;
       const fileNameLower = file.name.toLowerCase();
 
@@ -66,21 +121,19 @@ const App: React.FC = () => {
           const loadingTask = pdfjsLib.getDocument(arrayBuffer);
           const pdf = await loadingTask.promise;
           
+          // Extract text (helpful but secondary to images for layout)
           let fullText = '';
           for (let i = 1; i <= pdf.numPages; i++) {
               const page = await pdf.getPage(i);
               const textContent = await page.getTextContent();
-              
               let lastY = -1;
               let pageText = '';
-              
               const items = textContent.items.map((item: any) => ({
                   str: item.str,
                   y: item.transform ? item.transform[5] : 0,
                   x: item.transform ? item.transform[4] : 0,
                   hasEOL: item.hasEOL
               }));
-
               for (const item of items) {
                   if (lastY !== -1 && Math.abs(item.y - lastY) > 8) { 
                       pageText += '\n';
@@ -94,41 +147,38 @@ const App: React.FC = () => {
           }
           fileContent = fullText;
 
-          // --- SCANNED PDF DETECTION & IMAGE FALLBACK ---
-          // If extracted text is very short/empty, assume it's a scanned PDF (image).
-          if (fileContent.trim().length < 50) {
-              console.log("PDF text content is minimal/empty. Rendering pages as images for AI Vision...");
-              setLoadingStatus('Aplicando Visão Computacional em documento digitalizado...');
-              const numPagesToRender = Math.min(pdf.numPages, 3); // Limit to first 3 pages for performance
-              
-              for (let i = 1; i <= numPagesToRender; i++) {
-                  const page = await pdf.getPage(i);
-                  const viewport = page.getViewport({ scale: 1.5 }); // Good quality for OCR
-                  const canvas = document.createElement('canvas');
-                  const context = canvas.getContext('2d');
-                  if (context) {
-                      canvas.height = viewport.height;
-                      canvas.width = viewport.width;
-                      
-                      await page.render({ canvasContext: context, viewport: viewport }).promise;
-                      // Get clean base64 data (remove "data:image/jpeg;base64," prefix)
-                      const base64Data = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
-                      fileImages.push(base64Data);
-                  }
+          // Always render images for high-quality vision analysis
+          // This fixes issues with scanned PDFs or corrupt text layers
+          console.log("Rendering high-res images for AI Vision...");
+          const numPagesToRender = Math.min(pdf.numPages, 3); 
+          for (let i = 1; i <= numPagesToRender; i++) {
+              const page = await pdf.getPage(i);
+              // Scale 3.0 provides excellent clarity for small text (approx 200-300 DPI equivalent)
+              const viewport = page.getViewport({ scale: 3.0 }); 
+              const canvas = document.createElement('canvas');
+              const context = canvas.getContext('2d');
+              if (context) {
+                  canvas.height = viewport.height;
+                  canvas.width = viewport.width;
+                  await page.render({ canvasContext: context, viewport: viewport }).promise;
+                  const base64Data = canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
+                  fileImages.push(base64Data);
               }
           }
+
       } else {
           fileContent = await file.text();
       }
 
-      // Store content for refinement
       setCurrentFileContent(fileContent);
       setCurrentFileImages(fileImages);
 
-      // Check if we have EITHER text OR images
       if ((!fileContent || fileContent.trim().length === 0) && fileImages.length === 0) {
         throw new Error("O conteúdo do arquivo está vazio e não foi possível converter para imagem.");
       }
+      
+      // --- STEP 3: EXTERNAL DATA ---
+      setLoadingStep(3);
       
       let companyName: string | null = null;
       let emitterCnpj: string | null = null;
@@ -137,141 +187,67 @@ const App: React.FC = () => {
       let takerName: string | null = null;
       let municipality: string | null = null;
 
-      setLoadingStatus('Identificando participantes (Emitente/Tomador)...');
-
-      // --- EXTRACTION STRATEGY ---
+      // Extract basic metadata for API calls
       if (fileContent && fileContent.trim().length > 0 && file.name.toLowerCase().endsWith('.xml')) {
         try {
           const parser = new DOMParser();
           const xmlDoc = parser.parseFromString(fileContent, "application/xml");
-          
-          const errorNode = xmlDoc.querySelector("parsererror");
-          if (!errorNode) {
-              const allElements = Array.from(xmlDoc.getElementsByTagName('*'));
-              
-              // Helper to check ancestry
-              const hasAncestor = (el: Element, patterns: RegExp[]): boolean => {
-                  let current: Element | null = el.parentElement;
-                  while (current) {
-                      for (const p of patterns) {
-                          if (p.test(current.localName || '') || p.test(current.nodeName || '')) return true;
-                      }
-                      current = current.parentElement;
-                  }
-                  return false;
-              };
-
-              const emitterPatterns = [/emit/i, /prest/i];
-              const takerPatterns = [/dest/i, /tomador/i, /receb/i];
-
-              for (const el of allElements) {
-                  const tag = el.localName ? el.localName.toLowerCase() : '';
-                  const val = el.textContent?.trim();
-                  if (!val) continue;
-
-                  // CNPJ / CPF
-                  if (tag === 'cnpj' || tag === 'cpf') {
-                      if (!emitterCnpj && hasAncestor(el, emitterPatterns)) {
-                          emitterCnpj = val;
-                      } else if (!takerCnpj && hasAncestor(el, takerPatterns)) {
-                          takerCnpj = val;
-                      }
-                  }
-                  
-                  // Names
-                  if (tag === 'xnome' || tag === 'razaosocial') {
-                      if (!companyName && hasAncestor(el, emitterPatterns)) {
-                          companyName = val;
-                      } else if (!takerName && hasAncestor(el, takerPatterns)) {
-                          takerName = val;
-                      }
-                  }
-
-                  // Municipality
-                  if (tag === 'xmun' || tag === 'municipio' || tag === 'nomecidade') {
-                      if (!municipality && hasAncestor(el, emitterPatterns)) {
-                          municipality = val;
-                      }
-                  }
-
-                  // Date
-                  if ((tag === 'dhemi' || tag === 'demi' || tag === 'dataemissao' || tag === 'dataemissaorps') && !documentDate) {
-                      documentDate = val;
-                  }
-              }
+          const allElements = Array.from(xmlDoc.getElementsByTagName('*'));
+          for (const el of allElements) {
+              const tag = el.localName ? el.localName.toLowerCase() : '';
+              const val = el.textContent?.trim();
+              if (!val) continue;
+              if ((tag === 'cnpj' || tag === 'cpf') && !emitterCnpj) emitterCnpj = val; 
+              if ((tag === 'xnome' || tag === 'razaosocial') && !companyName) companyName = val;
+              if (tag === 'dhemi' && !documentDate) documentDate = val;
           }
-        } catch (xmlEx) {
-           console.warn("XML Scan failed:", xmlEx);
-        }
-
-        // --- REGEX FALLBACK (XML Only) ---
-        if (!companyName || !emitterCnpj) {
-             const findTag = (regex: RegExp, text: string) => {
-                 const match = text.match(regex);
-                 return match ? match[1] : null;
-             };
-
-             if (!emitterCnpj) emitterCnpj = findTag(/<(?:[\w\d]+:)?(?:CNPJ|Cnpj)[^>]*>(\d+)<\//i, fileContent); 
-             
-             const emitBlockMatch = fileContent.match(/<(?:[\w\d]+:)?(?:Emit|Emitente|Prestador|PrestadorServico)[\s\S]*?<\/(?:[\w\d]+:)?(?:Emit|Emitente|Prestador|PrestadorServico)>/i);
-             if (emitBlockMatch) {
-                 const block = emitBlockMatch[0];
-                 if (!companyName) companyName = findTag(/<(?:[\w\d]+:)?(?:xNome|RazaoSocial)[^>]*>([^<]+)<\//i, block);
-                 if (!municipality) municipality = findTag(/<(?:[\w\d]+:)?(?:xMun|Municipio|NomeCidade)[^>]*>([^<]+)<\//i, block);
-                 if (!emitterCnpj) emitterCnpj = findTag(/<(?:[\w\d]+:)?(?:CNPJ|Cnpj|CPF|Cpf)[^>]*>([^<]+)<\//i, block);
-             }
-
-             if (!documentDate) documentDate = findTag(/<(?:[\w\d]+:)?(?:dhEmi|dEmi|DataEmissao)[^>]*>([^<]+)<\//i, fileContent);
-        }
+        } catch (e) { /* ignore */ }
       }
       
-      // Fetch official company data if CNPJs are available
-      let fetchedEmitterData: CompanyData | null = null;
-      let fetchedTakerData: CompanyData | null = null;
-
-      if (emitterCnpj || takerCnpj) {
-        setLoadingStatus('Consultando bases oficiais (Receita Federal)...');
-        
-        if (emitterCnpj) {
-            fetchedEmitterData = await fetchCompanyData(emitterCnpj.replace(/\D/g, ''));
-            setOfficialEmitterData(fetchedEmitterData);
-        }
-        if (takerCnpj && takerCnpj.replace(/\D/g, '').length === 14) {
-            fetchedTakerData = await fetchCompanyData(takerCnpj.replace(/\D/g, ''));
-            setOfficialTakerData(fetchedTakerData);
-        }
+      if (!emitterCnpj) {
+          const cnpjMatch = fileContent.match(/(?:CNPJ|Cnpj)[^0-9]*(\d{14})/);
+          if (cnpjMatch) emitterCnpj = cnpjMatch[1];
       }
 
-      setLoadingStatus('Inteligência Artificial analisando conformidade tributária...');
+      if (emitterCnpj) {
+        const fetchedEmitterData = await fetchCompanyData(emitterCnpj.replace(/\D/g, ''));
+        setOfficialEmitterData(fetchedEmitterData);
+      }
+
+      // --- STEP 4: AI ANALYSIS ---
+      setLoadingStep(4);
+      await new Promise(r => setTimeout(r, 800)); 
 
       const result = await analyzeDocument(
           fileContent, 
           file.name, 
-          fileImages, // Pass images to service
+          fileImages, 
           companyName, 
           documentDate, 
           takerCnpj, 
           takerName,
-          fetchedEmitterData,
-          fetchedTakerData,
-          municipality
+          officialEmitterData,
+          officialTakerData,
+          municipality,
+          undefined,
+          warnings || []
       );
       
       setAuditResult(result);
+      setLoadingStep(0); // Done
 
     } catch (err) {
       console.error("Audit Error:", err);
-      const errorMessage = err instanceof Error ? err.message : "An unknown error occurred during the audit.";
-      setError(`Falha na auditoria do documento. ${errorMessage}`);
-    } finally {
-      setLoadingStatus(null);
+      const errorMessage = err instanceof Error ? err.message : "Erro desconhecido.";
+      setError(`Falha na auditoria. ${errorMessage}`);
+      setLoadingStep(0);
     }
   }, []);
 
   const handleRefineAudit = useCallback(async (userRates: UserTaxRates) => {
-    if (!currentFile || (!currentFileContent && currentFileImages.length === 0)) return;
+    if (!currentFile) return;
 
-    setLoadingStatus('Refinando análise com novos parâmetros tributários...');
+    setLoadingStep(4); // Reuse step 4 for refinement
     setAuditResult(null); 
 
     try {
@@ -279,23 +255,23 @@ const App: React.FC = () => {
             currentFileContent,
             currentFile.name,
             currentFileImages,
-            auditResult?.companyName, // Reuse existing meta if available
+            auditResult?.provider?.name, 
             auditResult?.documentDate,
-            auditResult?.takerCnpj,
-            auditResult?.takerName,
+            auditResult?.taker?.cnpj,
+            auditResult?.taker?.name,
             officialEmitterData,
             officialTakerData,
             null, 
-            userRates // Pass user manual rates
+            userRates,
+            validationWarnings
         );
         setAuditResult(result);
     } catch (err) {
-        console.error("Refinement Error:", err);
-        setError("Erro ao refinar a análise. Tente novamente.");
+        setError("Erro ao refinar a análise.");
     } finally {
-        setLoadingStatus(null);
+        setLoadingStep(0);
     }
-  }, [currentFile, currentFileContent, currentFileImages, auditResult, officialEmitterData, officialTakerData]);
+  }, [currentFile, currentFileContent, currentFileImages, auditResult, officialEmitterData, officialTakerData, validationWarnings]);
   
   const handleReset = () => {
     setAuditResult(null);
@@ -305,7 +281,7 @@ const App: React.FC = () => {
     setCurrentFileImages([]);
     setOfficialEmitterData(null);
     setOfficialTakerData(null);
-    setLoadingStatus(null);
+    setLoadingStep(0);
   };
 
   return (
@@ -319,53 +295,23 @@ const App: React.FC = () => {
               Desenvolvido BY - SP Assessoria Contabil
             </p>
             <p className="mt-4 text-lg text-slate-600 dark:text-slate-400">
-              Faça upload de um ou mais documentos fiscais (XML ou PDF) para uma análise tributária inteligente.
+              Auditoria de NFe, NFSe (incluindo Guarulhos/GissOnline) e CTe.
             </p>
           </div>
 
           {!auditResult && !isLoading && <FileUpload onFileSelect={handleFileAudit} disabled={isLoading} />}
           
           {isLoading && (
-            <div className="flex flex-col items-center justify-center p-8 bg-white dark:bg-slate-800 rounded-lg shadow-md border border-slate-200 dark:border-slate-700 animate-fade-in-down">
-              <div className="relative">
-                 <SparkleIcon className="w-16 h-16 text-indigo-500 animate-bounce" />
-                 <span className="absolute top-0 right-0 flex h-3 w-3">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-500"></span>
-                 </span>
-              </div>
-              
-              <h3 className="mt-6 text-xl font-semibold text-slate-800 dark:text-white">Análise em Andamento</h3>
-              <p className="text-indigo-600 dark:text-indigo-400 font-medium mt-1">{loadingStatus}</p>
-              
-              <div className="w-full max-w-md mt-4 bg-slate-200 dark:bg-slate-700 rounded-full h-2.5 overflow-hidden">
-                <div className="bg-indigo-600 h-2.5 rounded-full animate-progress" style={{ width: '100%' }}></div>
-              </div>
-              
-              <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">
-                 Documento: <span className="font-mono text-slate-700 dark:text-slate-300">{currentFile?.name}</span>
-              </p>
-              <style>{`
-                @keyframes progress {
-                  0% { width: 0%; margin-left: 0; }
-                  50% { width: 50%; }
-                  100% { width: 100%; }
-                }
-                .animate-progress {
-                  animation: progress 2s ease-in-out infinite;
-                }
-              `}</style>
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md border border-slate-200 dark:border-slate-700 p-8">
+                <h3 className="text-center text-xl font-semibold mb-6">Processando Documento</h3>
+                <LoadingStepper currentStep={loadingStep} />
             </div>
           )}
 
           {error && (
-            <div className="p-4 my-4 text-sm text-red-800 rounded-lg bg-red-100 dark:bg-red-900 dark:text-red-300 border border-red-200 dark:border-red-800 shadow-sm" role="alert">
-              <div className="flex items-center gap-2">
-                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                 <span className="font-bold">Falha na Análise:</span>
-              </div>
-              <p className="mt-1 ml-7">{error}</p>
-              <button onClick={handleReset} className="ml-7 mt-2 text-xs font-bold underline hover:text-red-900 dark:hover:text-white transition-colors">Tentar outro arquivo</button>
+            <div className="p-4 my-4 text-sm text-red-800 rounded-lg bg-red-100 dark:bg-red-900 dark:text-red-300 border border-red-200 dark:border-red-800 shadow-sm">
+              <p><strong>Erro:</strong> {error}</p>
+              <button onClick={handleReset} className="mt-2 underline">Tentar novamente</button>
             </div>
           )}
 

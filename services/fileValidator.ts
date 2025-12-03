@@ -2,13 +2,14 @@
 interface ValidationResult {
     isValid: boolean;
     error?: string;
+    warnings?: string[]; // New field to carry non-blocking errors to the AI
 }
 
 // --- CPF Validation Algorithm (Mod 11) ---
 const isValidCPF = (cpf: string): boolean => {
     const cleanCPF = cpf.replace(/\D/g, '');
     if (cleanCPF.length !== 11) return false;
-    if (/^(\d)\1+$/.test(cleanCPF)) return false; // Check for repeated digits like 111.111.111-11
+    if (/^(\d)\1+$/.test(cleanCPF)) return false; 
 
     let sum = 0;
     let remainder;
@@ -67,7 +68,6 @@ const getByLocalName = (root: Element | Document, localName: string): Element[] 
     const results: Element[] = [];
     const allElements = root.getElementsByTagName("*");
     for (let i = 0; i < allElements.length; i++) {
-        // Case insensitive comparison for robustness
         if (allElements[i].localName?.toLowerCase() === localName.toLowerCase()) {
             results.push(allElements[i]);
         }
@@ -75,7 +75,6 @@ const getByLocalName = (root: Element | Document, localName: string): Element[] 
     return results;
 };
 
-// Helper to determine the context of an element based on its parent
 const getContextName = (element: Element): string => {
     const parent = element.parentElement;
     if (!parent) return 'Desconhecido';
@@ -90,8 +89,10 @@ const getContextName = (element: Element): string => {
     return `<${parent.localName}>`;
 };
 
-const validateCNPJs = (doc: Document): string | null => {
+// Returns array of warnings instead of single error string
+const validateCNPJs = (doc: Document): string[] => {
     const nodes = getByLocalName(doc, 'CNPJ');
+    const warnings: string[] = [];
     
     for (const node of nodes) {
         const val = node.textContent?.trim() || '';
@@ -99,14 +100,15 @@ const validateCNPJs = (doc: Document): string | null => {
 
         if (!isValidCNPJ(val)) {
             const context = getContextName(node);
-            return `CNPJ inválido encontrado (${context}): '${val}'. Verifique se os dígitos estão corretos.`;
+            warnings.push(`CNPJ inválido detectado na estrutura XML (${context}): '${val}'. Dígitos verificadores incorretos.`);
         }
     }
-    return null;
+    return warnings;
 };
 
-const validateCPFs = (doc: Document): string | null => {
+const validateCPFs = (doc: Document): string[] => {
     const nodes = getByLocalName(doc, 'CPF');
+    const warnings: string[] = [];
     
     for (const node of nodes) {
         const val = node.textContent?.trim() || '';
@@ -114,31 +116,64 @@ const validateCPFs = (doc: Document): string | null => {
 
         if (!isValidCPF(val)) {
             const context = getContextName(node);
-            return `CPF inválido encontrado (${context}): '${val}'. Verifique se os dígitos estão corretos.`;
+            warnings.push(`CPF inválido detectado na estrutura XML (${context}): '${val}'. Dígitos verificadores incorretos.`);
         }
     }
-    return null;
+    return warnings;
 };
 
-const validateNCM = (doc: Document): string | null => {
+const validateNCM = (doc: Document): string[] => {
     const ncmNodes = getByLocalName(doc, 'NCM');
+    const warnings: string[] = [];
     
     for (const node of ncmNodes) {
         const ncm = node.textContent?.trim() || '';
         if (ncm.length === 0) continue;
 
-        // Check 1: Must be exactly 8 digits
         if (!/^\d{8}$/.test(ncm)) {
-            return `NCM inválido encontrado: '${ncm}'. O código NCM deve conter exatamente 8 dígitos numéricos (Formato: 0000.00.00).`;
-        }
-
-        // Check 2: Basic Chapter Validation (First 2 digits must be between 01 and 97)
-        const chapter = parseInt(ncm.substring(0, 2), 10);
-        if (chapter < 1 || chapter > 97) {
-            return `NCM suspeito encontrado: '${ncm}'. O capítulo (dois primeiros dígitos: ${ncm.substring(0, 2)}) não parece corresponder a um capítulo válido da TIPI (01 a 97).`;
+            warnings.push(`Formato NCM inválido: '${ncm}'. Esperado 8 dígitos numéricos.`);
+        } else {
+            const chapter = parseInt(ncm.substring(0, 2), 10);
+            if (chapter < 1 || chapter > 97) {
+                 warnings.push(`Capítulo NCM suspeito: '${ncm}'. Inicia com '${ncm.substring(0, 2)}', esperado 01-97.`);
+            }
         }
     }
-    return null;
+    return warnings;
+};
+
+// --- CTe Specific Validation ---
+const validateCTeStructure = (doc: Document): string[] => {
+    const warnings: string[] = [];
+    const infCte = getByLocalName(doc, 'infCte');
+    
+    if (infCte.length === 0) return warnings; // Not a CTe or weird structure
+
+    // 1. Validate "Tomador do Serviço" (toma)
+    // 0-Remetente, 1-Expedidor, 2-Recebedor, 3-Destinatário
+    const toma = getByLocalName(doc, 'toma');
+    if (toma.length === 0) {
+        // Some CTe versions use <toma3> or <toma4>
+        const toma3 = getByLocalName(doc, 'toma3');
+        const toma4 = getByLocalName(doc, 'toma4');
+        if (toma3.length === 0 && toma4.length === 0) {
+            warnings.push("CTe sem indicação clara do Tomador do Serviço (<toma>, <toma3> ou <toma4>).");
+        }
+    }
+
+    // 2. Validate Service Value
+    const vPrest = getByLocalName(doc, 'vPrest');
+    if (vPrest.length === 0) {
+        warnings.push("CTe sem Valor da Prestação de Serviço (<vPrest>).");
+    }
+
+    // 3. Check for Modal (Road, Air, etc)
+    const modalTag = ['rodo', 'aereo', 'aquav', 'ferrov', 'dutov', 'multimodal'].some(m => getByLocalName(doc, m).length > 0);
+    if (!modalTag) {
+        warnings.push("CTe sem modal de transporte identificado (Rodoviário, Aéreo, etc).");
+    }
+
+    return warnings;
 };
 
 const validateXML = async (file: File): Promise<ValidationResult> => {
@@ -154,36 +189,28 @@ const validateXML = async (file: File): Promise<ValidationResult> => {
     }
 
     const hasTaxTags = [
-        'NFe', 'CTe', 'Nfse', 'Rps', 'Lote', 'Prestador', 'Tomador', 'Emit', 'Dest', 'Servico', 'InfNfe'
+        'NFe', 'CTe', 'Nfse', 'Rps', 'Lote', 'Prestador', 'Tomador', 'Emit', 'Dest', 'Servico', 'InfNfe', 'Tributos', 'Valores'
     ].some(tag => getByLocalName(doc, tag).length > 0 || text.includes(tag));
 
     if (hasTaxTags) {
-         // 1. Validate CNPJs specifically
-         const cnpjError = validateCNPJs(doc);
-         if (cnpjError) {
-             return { isValid: false, error: cnpjError };
+         const warnings: string[] = [];
+         
+         warnings.push(...validateCNPJs(doc));
+         warnings.push(...validateCPFs(doc));
+         warnings.push(...validateNCM(doc));
+
+         // Specific CTe checks
+         if (getByLocalName(doc, 'CTe').length > 0 || text.includes('infCte')) {
+             warnings.push(...validateCTeStructure(doc));
          }
 
-         // 2. Validate CPFs specifically
-         const cpfError = validateCPFs(doc);
-         if (cpfError) {
-             return { isValid: false, error: cpfError };
-         }
-
-         // 3. Specific NCM Validation
-         const ncmError = validateNCM(doc);
-         if (ncmError) {
-             return { isValid: false, error: ncmError };
-         }
-
-         return { isValid: true };
+         return { isValid: true, warnings };
     }
 
     return { isValid: false, error: 'O arquivo XML não parece ser um documento fiscal reconhecido (NFe, CTe, NFSe). Tags fiscais essenciais não foram encontradas.' };
 };
 
 const validatePDF = async (file: File): Promise<ValidationResult> => {
-    // Validates PDF header magic numbers
     if (file.size === 0) {
         return { isValid: false, error: 'O arquivo PDF está vazio.' };
     }
@@ -196,7 +223,7 @@ const validatePDF = async (file: File): Promise<ValidationResult> => {
             return { isValid: false, error: 'O arquivo não parece ser um PDF válido. O cabeçalho do arquivo está incorreto.' };
         }
         
-        return { isValid: true };
+        return { isValid: true, warnings: [] };
     } catch (error) {
         return { isValid: false, error: 'Erro ao ler o arquivo PDF.' };
     }
